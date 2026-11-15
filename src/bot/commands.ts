@@ -1,6 +1,6 @@
-// Mnemo's slash command, shared by the bot (registered at start) and the
+// Mnemo's slash commands, shared by the bot (registered at start) and the
 // manifest (registered when an Owner adds Mnemo).
-import { OptionType, type CommandInput } from '@mnema-xyz/bot-sdk'
+import { OptionType, Permissions, type CommandInput } from '@mnema-xyz/bot-sdk'
 
 export const ASK_COMMAND: CommandInput = {
   name: 'ask',
@@ -11,17 +11,17 @@ export const ASK_COMMAND: CommandInput = {
   ],
 }
 
-/** Admin-only: how the last public answer in this channel was made. The
- * platform cannot hide a command from members, so Mnemo registers it only
- * when admins are configured and refuses everyone else in private. */
+/** Admin-only: how the last public answer in this channel was made.
+ * Restricted to administrators by default_member_permissions. */
 export const DETAILS_COMMAND: CommandInput = {
   name: 'details',
   description: 'For Mnemo admins: how the last answer in this channel was made',
+  default_member_permissions: Permissions.Administrator.toString(),
 }
 
-/** The manifest lists only /ask; /details is added at start when needed. */
-export const COMMANDS: CommandInput[] = [ASK_COMMAND]
+/** Mnemo registers both /ask and /details (/details is restricted to admins). */
+export const COMMANDS: CommandInput[] = [ASK_COMMAND, DETAILS_COMMAND]
 
-export function commandsFor(adminUserIds: readonly string[]): CommandInput[] {
-  return adminUserIds.length > 0 ? [ASK_COMMAND, DETAILS_COMMAND] : COMMANDS
+export function commandsFor(_adminUserIds?: readonly string[]): CommandInput[] {
+  return COMMANDS
 }

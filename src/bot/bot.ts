@@ -10,6 +10,7 @@ import {
   MaxBytesExceededError,
   modal,
   NotFoundError,
+  Permissions,
   RestError,
   textInput,
   TextInputStyle,
@@ -40,7 +41,7 @@ import { customId, detailsFrom, detailsText, parseCustomId, type AnswerDetails }
 export interface BotSettings {
   /** Channel IDs Mnemo answers in; empty means all it can see. */
   allowedChannels: string[]
-  /** User IDs that may run /details; empty registers no /details at all. */
+  /** User IDs that may run /details and regenerate answers; optional (administrators always have access). */
   adminUserIds: string[]
   /** Regenerations per answer; 0 removes the button. */
   maxRegenerations: number
@@ -481,11 +482,15 @@ export class MnemoBot {
     }
   }
 
+  private isAdmin(i: Interaction): boolean {
+    return this.s.adminUserIds.includes(i.user.id) || i.hasPermission(Permissions.Administrator)
+  }
+
   /** /details: admins only. Everyone else gets a private refusal, and no
    * detail reaches the channel or anyone else. */
   private async onDetails(i: Interaction): Promise<void> {
-    // Admins only; the answer lookup is per channel.
-    if (!this.s.adminUserIds.includes(i.user.id)) {
+    // Admins only: server administrators or configured adminUserIds.
+    if (!this.isAdmin(i)) {
       this.log.info('details_refused', { user: i.user.id, channel: i.channelId })
       await i.reply({ content: 'Only Mnemo admins can see how an answer was made.', ephemeral: true, allowed_mentions: NO_PINGS })
       return
@@ -523,7 +528,7 @@ export class MnemoBot {
   }
 
   private async onRegenerate(i: Interaction, answerId: string, rec: AnswerRecord): Promise<void> {
-    if (i.user.id !== rec.askerId && !this.s.adminUserIds.includes(i.user.id)) {
+    if (i.user.id !== rec.askerId && !this.isAdmin(i)) {
       await i.reply({ content: 'Only the person who asked, or a Mnemo admin, can regenerate this answer.', ephemeral: true, allowed_mentions: NO_PINGS })
       return
     }

@@ -30,6 +30,11 @@
           "required": false
         }
       ]
+    },
+    {
+      "name": "details",
+      "description": "For Mnemo admins: how the last answer in this channel was made",
+      "default_member_permissions": "1"
     }
   ]
 }
