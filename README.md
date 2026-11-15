@@ -129,17 +129,16 @@ type `/ask`. Nothing happens? See [Troubleshooting](#troubleshooting).
 | Write in a thread that Mnemo started (no mention needed) | Answers in the thread and remembers the conversation so far (bounded, see `MNEMO_THREAD_*`) |
 | Mention it inside somebody else's thread | Answers that one message there, with no earlier context, and does not follow that thread |
 | `/ask question:… [private:true]` | Answers in the channel, or only to you with `private` |
-| **Regenerate** | Writes a new answer to the same question. Only the person who asked, or a Mnemo admin (`MNEMO_ADMIN_USER_IDS`), can use it, at most `MNEMO_MAX_REGENERATIONS` times per answer (default 2; `0` removes the button). Every regeneration counts against the daily budget and the rate limits. The old answer stays but loses its buttons, and the button disappears from the last answer once the limit is reached |
+| **Regenerate** | Writes a new answer to the same question. Only the person who asked, or an admin (server administrator or `MNEMO_ADMIN_USER_IDS`), can use it, at most `MNEMO_MAX_REGENERATIONS` times per answer (default 2; `0` removes the button). Every regeneration counts against the daily budget and the rate limits. The old answer stays but loses its buttons, and the button disappears from the last answer once the limit is reached |
 | `/details` (admins only) | Shows you privately which tools were used with which input, which model answered, the tokens used and what was sent to the provider, for the last public answer in the channel. Answers to `/ask private:true` are never shown |
 | **Follow up** (under `/ask` answers) | Opens a small form for a follow-up question, which is answered with the earlier question and answer as context |
 | Mention or reply with an attachment | Prompts for consent first, then answers questions about the image or file |
 
-**Details are an admin matter.** Mnema Talk does not tell a bot who is an admin
-(an interaction carries the member's ID and names only) and cannot hide a
-command from some members, so Mnemo decides itself: set `MNEMO_ADMIN_USER_IDS`
-to the user IDs that may run `/details`. Mnemo registers `/details` only when
-that list is not empty, so without it the command does not exist. Anyone else
-who runs it (it stays visible to members while it is registered) gets a private
+**Details are an admin matter.** `/details` is restricted to administrators by
+default (`default_member_permissions`). Server administrators always have
+access to `/details` and can regenerate answers. To give additional members
+access without granting them full server administrator privileges, set
+`MNEMO_ADMIN_USER_IDS` to their user IDs. Anyone else who runs it gets a private
 refusal and sees nothing. The same facts, without any message text, are in the
 log at `info` level (`answer_details`, `details_viewed`, `details_refused`).
 
@@ -226,7 +225,7 @@ file refuses them. Mnemo never logs them.
 | `MNEMO_ALLOWED_CHANNELS` | *(all it can see)* | Comma-separated channel IDs |
 | `MNEMO_REPLY_IN_THREAD` | `true` | Answer a mention in a thread (`false`: as a reply in the channel, without thread memory) |
 | `MNEMO_SEND_DISPLAY_NAME` | `false` | Tell the provider the asker's display name |
-| `MNEMO_ADMIN_USER_IDS` | none | Comma-separated user IDs that may run `/details`. Empty: no `/details` command |
+| `MNEMO_ADMIN_USER_IDS` | none | Comma-separated user IDs that may run `/details` and regenerate answers (optional; server administrators always have access) |
 | `MNEMO_MAX_REGENERATIONS` | `2` | How often one answer may be regenerated (0 to 10); `0` removes the Regenerate button |
 | `MNEMO_THREAD_MAX_TURNS` | `12` | Messages of a thread that Mnemo remembers (a question and an answer are two) |
 | `MNEMO_THREAD_MAX_CHARS` | `12000` | Characters of a thread that Mnemo remembers; the oldest are dropped first |
@@ -560,7 +559,7 @@ something goes wrong.
 | Answers say `the AI provider timed out` | A slow model or a local model loading; raise `MNEMO_PROVIDER_TIMEOUT_MS` |
 | A local model answers but never uses tools | The model does not support tool calling. Choose one that does |
 | "I have used up today's budget" | The daily budget is reached; raise `MNEMO_DAILY_TOKEN_BUDGET` or wait for midnight UTC |
-| `/details` says only admins can use it | The user ID is not in `MNEMO_ADMIN_USER_IDS` |
+| `/details` says only admins can use it | The member is not a server administrator and their user ID is not in `MNEMO_ADMIN_USER_IDS` |
 | Regenerate is missing under an answer | `MNEMO_MAX_REGENERATIONS` is `0`, or the answer was already regenerated that often |
 | Regenerate says the answer is too old | Mnemo was restarted, or the answer is more than 24 hours old. Ask again |
 | No 👀 reaction | Mnemo lacks *Add reactions* in that channel; it still answers |

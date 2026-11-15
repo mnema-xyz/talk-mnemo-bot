@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { describe, it } from 'node:test'
-import type { Client, Interaction } from '@mnema-xyz/bot-sdk'
+import { Permissions, type Client, type Interaction } from '@mnema-xyz/bot-sdk'
 import { MnemoBot, type BotSettings } from '../src/bot/bot.ts'
 import { commandsFor } from '../src/bot/commands.ts'
 import { Engine } from '../src/engine/engine.ts'
@@ -65,9 +65,14 @@ function setup(over: Partial<BotSettings> = {}, budget = new Budget({ dailyToken
 }
 
 /** A fake interaction that records what it sent. */
-function fake(kind: { command: string; options?: Record<string, string | boolean> } | { customId: string }, userId = 'u1', channelId = 'c1') {
+function fake(
+  kind: { command: string; options?: Record<string, string | boolean>; permissions?: bigint } | { customId: string; permissions?: bigint },
+  userId = 'u1',
+  channelId = 'c1',
+) {
   const sent: Sent[] = []
   const command = 'command' in kind
+  const perms = ('permissions' in kind && kind.permissions !== undefined) ? kind.permissions : 0n
   const i = {
     user: { id: userId, username: userId, display_name: userId },
     channelId,
@@ -75,9 +80,13 @@ function fake(kind: { command: string; options?: Record<string, string | boolean
     customId: command ? '' : kind.customId,
     options: new Map(Object.entries(command ? (kind.options ?? {}) : {})),
     fields: new Map<string, string>(),
+    member: {
+      permissions: perms.toString(),
+    },
     isCommand: () => command,
     isButton: () => !command,
     isModalSubmit: () => false,
+    hasPermission: (perm: bigint) => (perms & Permissions.Administrator) === Permissions.Administrator || (perms & perm) === perm,
     reply: (d: Sent) => Promise.resolve(void sent.push(d)),
     deferReply: () => Promise.resolve(),
     deferUpdate: () => Promise.resolve(),
@@ -113,9 +122,10 @@ describe('answer buttons', () => {
 })
 
 describe('/details', () => {
-  it('is registered only when admins are configured', async () => {
-    assert.deepEqual(commandsFor([]).map((c) => c.name), ['ask'])
-    assert.deepEqual(commandsFor(['admin']).map((c) => c.name), ['ask', 'details'])
+  it('is registered with default_member_permissions restricting it to administrators', async () => {
+    assert.deepEqual(commandsFor().map((c) => c.name), ['ask', 'details'])
+    const details = commandsFor().find((c) => c.name === 'details')
+    assert.equal(details?.default_member_permissions, Permissions.Administrator.toString())
     const t = setup()
     t.events.emit('ready', { user: { id: 'bot', username: 'mnemo' }, session_id: 's' })
     await new Promise((r) => setTimeout(r, 20))
@@ -144,12 +154,23 @@ describe('/details', () => {
     assert.equal(d.sent[0]?.components, undefined)
   })
 
-  it('refuses everyone when no admin is configured', async () => {
+  it('refuses members when no admin is configured and user is not an administrator', async () => {
     const t = setup({ adminUserIds: [] })
     await ask(t)
-    const d = fake({ command: 'details' }, 'admin')
+    const d = fake({ command: 'details' }, 'regular-user')
     await t.run(d.i)
     assert.match(d.sent[0]?.content ?? '', /Only Mnemo admins/)
+  })
+
+  it('allows a server administrator even when adminUserIds is empty', async () => {
+    const t = setup({ adminUserIds: [] })
+    await ask(t)
+    const d = fake({ command: 'details', permissions: Permissions.Administrator }, 'admin-member')
+    await t.run(d.i)
+    assert.equal(d.sent.length, 1)
+    assert.equal(d.sent[0]?.ephemeral, true)
+    assert.match(d.sent[0]?.content ?? '', /How this answer was made/)
+    assert.match(d.sent[0]?.content ?? '', /fake-model/)
   })
 
   it('does not show details of a private answer', async () => {
@@ -210,6 +231,15 @@ describe('regeneration limit', () => {
     const t = setup({ maxRegenerations: 1 })
     const first = await ask(t)
     const byAdmin = fake({ customId: first.regen ?? '' }, 'admin')
+    await t.run(byAdmin.i)
+    assert.ok(byAdmin.sent.some((m) => m.content?.startsWith('You asked')))
+    assert.deepEqual(buttonsOf(byAdmin.sent.at(-1)), ['Follow up'])
+  })
+
+  it('lets a server administrator regenerate even when adminUserIds is empty', async () => {
+    const t = setup({ adminUserIds: [], maxRegenerations: 1 })
+    const first = await ask(t)
+    const byAdmin = fake({ customId: first.regen ?? '', permissions: Permissions.Administrator }, 'admin-member')
     await t.run(byAdmin.i)
     assert.ok(byAdmin.sent.some((m) => m.content?.startsWith('You asked')))
     assert.deepEqual(buttonsOf(byAdmin.sent.at(-1)), ['Follow up'])

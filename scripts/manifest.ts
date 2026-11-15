@@ -20,5 +20,6 @@ const manifest = {
   commands: COMMANDS,
 }
 
-writeFileSync(new URL('mnemo.manifest.json', root), JSON.stringify(manifest, null, 2) + '\n')
-console.log(`mnemo.manifest.json written (${JSON.stringify(manifest).length} bytes)`)
+const json = JSON.stringify(manifest, null, 2) + '\n'
+writeFileSync(new URL('mnemo.manifest.json', root), json)
+console.log(`mnemo.manifest.json written (${json.length} bytes)`)
