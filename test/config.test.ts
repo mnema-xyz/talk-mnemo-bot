@@ -80,4 +80,31 @@ describe('config', () => {
     assert.ok(problems({ ...minimal, MNEMO_SEARCH_PROVIDER: 'brave' }).some((p) => p.includes('MNEMO_SEARCH_API_KEY is missing')))
     assert.equal(loadConfig({ ...minimal, MNEMO_SEARCH_PROVIDER: 'brave', MNEMO_SEARCH_API_KEY: 'b' }).searchApiKey, 'b')
   })
+
+  it('configures attachments and enforces the 10 MB upper bound', () => {
+    const c = loadConfig(minimal)
+    assert.equal(c.attachments.enabled, true)
+    assert.equal(c.attachments.maxBytes, 10 * 1024 * 1024)
+    assert.equal(c.attachments.askConsent, true)
+    assert.equal(c.vision, true)
+
+    const over = problems({ ...minimal, MNEMO_ATTACHMENTS_MAX_BYTES: '20000000' })
+    assert.ok(over.some((p) => p.includes('attachments') || p.includes('10485760')))
+
+    const customized = loadConfig({
+      ...minimal,
+      MNEMO_ATTACHMENTS_ENABLED: 'false',
+      MNEMO_ATTACHMENTS_MAX_BYTES: '5000000',
+      MNEMO_ATTACHMENTS_ASK_CONSENT: 'false',
+      MNEMO_ATTACHMENTS_PROVIDER_NAME: 'CustomAI',
+      MNEMO_ATTACHMENTS_LOCAL: 'true',
+      MNEMO_VISION: 'false',
+    })
+    assert.equal(customized.attachments.enabled, false)
+    assert.equal(customized.attachments.maxBytes, 5_000_000)
+    assert.equal(customized.attachments.askConsent, false)
+    assert.equal(customized.attachments.providerName, 'CustomAI')
+    assert.equal(customized.attachments.local, true)
+    assert.equal(customized.vision, false)
+  })
 })

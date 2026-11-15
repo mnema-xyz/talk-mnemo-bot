@@ -235,6 +235,100 @@
         "warn",
         "error"
       ]
+    },
+    "vision": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string",
+          "enum": [
+            "0",
+            "1",
+            "true",
+            "false",
+            "yes",
+            "no",
+            "on",
+            "off"
+          ]
+        }
+      ]
+    },
+    "attachments": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false",
+                "yes",
+                "no",
+                "on",
+                "off"
+              ]
+            }
+          ]
+        },
+        "maxBytes": {
+          "default": 10485760,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10485760
+        },
+        "askConsent": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false",
+                "yes",
+                "no",
+                "on",
+                "off"
+              ]
+            }
+          ]
+        },
+        "providerName": {
+          "type": "string"
+        },
+        "local": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false",
+                "yes",
+                "no",
+                "on",
+                "off"
+              ]
+            }
+          ]
+        }
+      }
     }
   },
   "$id": "https://github.com/mnema-xyz/talk-mnemo-bot/mnemo.config.schema.json",

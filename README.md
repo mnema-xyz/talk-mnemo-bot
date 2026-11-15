@@ -132,6 +132,7 @@ type `/ask`. Nothing happens? See [Troubleshooting](#troubleshooting).
 | **Regenerate** | Writes a new answer to the same question. Only the person who asked, or a Mnemo admin (`MNEMO_ADMIN_USER_IDS`), can use it, at most `MNEMO_MAX_REGENERATIONS` times per answer (default 2; `0` removes the button). Every regeneration counts against the daily budget and the rate limits. The old answer stays but loses its buttons, and the button disappears from the last answer once the limit is reached |
 | `/details` (admins only) | Shows you privately which tools were used with which input, which model answered, the tokens used and what was sent to the provider, for the last public answer in the channel. Answers to `/ask private:true` are never shown |
 | **Follow up** (under `/ask` answers) | Opens a small form for a follow-up question, which is answered with the earlier question and answer as context |
+| Mention or reply with an attachment | Prompts for consent first, then answers questions about the image or file |
 
 **Details are an admin matter.** Mnema Talk does not tell a bot who is an admin
 (an interaction carries the member's ID and names only) and cannot hide a
@@ -141,6 +142,29 @@ that list is not empty, so without it the command does not exist. Anyone else
 who runs it (it stays visible to members while it is registered) gets a private
 refusal and sees nothing. The same facts, without any message text, are in the
 log at `info` level (`answer_details`, `details_viewed`, `details_refused`).
+
+### Images and file attachments
+
+Mnemo can read images and files attached to the message that mentions it, or to
+the message it replies to:
+
+- **Consent first**: Before downloading or sending anything to an AI provider,
+  Mnemo asks in the channel with **Yes, check it** and **No** buttons. Only the
+  member who asked can answer, and the question expires after 10 minutes. If
+  using a local model (`attachments.local: true` / `MNEMO_ATTACHMENTS_LOCAL=true`),
+  the prompt states that the file stays on this server and will be processed by
+  the local model. Consent can be disabled with `MNEMO_ATTACHMENTS_ASK_CONSENT=false`.
+- **Size limit**: Attachments up to 10 MB are supported. The size is checked
+  from metadata before downloading; files over 10 MB are refused without downloading.
+- **Supported types**:
+  - Images (`png`, `jpeg`, `webp`, `gif` first frame) are sent to vision-capable
+    models, downscaled automatically to fit provider limits (e.g. Anthropic's 5 MB
+    and 8000 px limit).
+  - PDFs have text extracted (or sent as document blocks to Anthropic).
+  - Text files (`txt`, `md`, `csv`, `json`, `log`, and source code) are read as text.
+  - Unsupported files (archives, audio, video) are refused before downloading.
+- **Privacy**: Attachment data is never written to disk or kept in thread memory.
+  Only Mnemo's text answer is retained.
 
 Mnemo ignores other bots and its own messages, never reads a channel's
 history, and only answers in the channels it was given (narrow them further
@@ -183,6 +207,7 @@ file refuses them. Mnemo never logs them.
 | `MNEMO_ANTHROPIC_EFFORT` | `low` | `low`, `medium` or `high`: how much the model thinks before answering (Anthropic only) |
 | `MNEMO_MAX_OUTPUT_TOKENS` | `4096` | Upper limit of one model reply |
 | `MNEMO_PROVIDER_TIMEOUT_MS` | `60000` | Limit for one provider call |
+| `MNEMO_VISION` | `true` | `true` or `false`: whether the model supports image input |
 
 ### Tools
 
@@ -208,6 +233,16 @@ file refuses them. Mnemo never logs them.
 | `MNEMO_THREAD_TTL_HOURS` | `24` | Mnemo forgets a thread that has been quiet for this long |
 | `MNEMO_SYSTEM_PROMPT` | built in | The persona, see [Changing the persona](#changing-the-persona) |
 | `MNEMO_SYSTEM_PROMPT_FILE` | | The persona from a file |
+
+### Attachments
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MNEMO_ATTACHMENTS` / `MNEMO_ATTACHMENTS_ENABLED` | `true` | Whether Mnemo can read images and file attachments |
+| `MNEMO_ATTACHMENTS_MAX_BYTES` | `10485760` (10 MB) | Maximum attachment size in bytes (upper bound 10 MB) |
+| `MNEMO_ATTACHMENTS_ASK_CONSENT` | `true` | Ask for consent before downloading or forwarding attachments |
+| `MNEMO_ATTACHMENTS_PROVIDER_NAME` | *(provider name)* | Provider name displayed in the consent prompt |
+| `MNEMO_ATTACHMENTS_LOCAL` | `false` | When true, consent prompt indicates the file stays on this server and is processed locally |
 
 ### Limits and budget
 
@@ -340,7 +375,10 @@ contacts outside services.
 - the asker's display name, **only** with `MNEMO_SEND_DISPLAY_NAME=true` (off
   by default);
 - the system prompt, the current date and time (UTC), the tool descriptions
-  and the tools' results.
+  and the tools' results;
+- when asking about an attachment (with consent granted): the processed image,
+  document, or extracted text for that question. Attachment bytes are never
+  stored on disk or kept in thread history.
 
 When an admin regenerates an answer in a thread, the model sees the admin's
 display name instead of the asker's (only with `MNEMO_SEND_DISPLAY_NAME` on).
@@ -360,8 +398,8 @@ thread is forgotten and Mnemo stops answering there without a mention) and what 
 2000 answers). A restart forgets them. On disk there is only the day's token
 count (`budget.json` in `MNEMO_DATA_DIR`), without any content.
 
-**Logs** hold events, counts, model and tool names. They contain no message
-text and no secrets.
+**Logs** hold events, counts, model and tool names, and attachment sizes and MIME
+types. They contain no message text, attachment content or secrets.
 
 Your provider's own terms decide what happens to the data it receives (for
 example, whether it is used for training or how long it is kept). Read them,
@@ -637,13 +675,14 @@ about AI. To put Mnemo into another chat, keep `engine/`, `providers/` and
 
 ## Dependencies
 
-Four runtime dependencies, each for a reason:
+Five runtime dependencies, each for a reason:
 
 | Package | Why |
 |---|---|
 | [`@mnema-xyz/bot-sdk`](https://www.npmjs.com/package/@mnema-xyz/bot-sdk) | The official SDK: REST, gateway with heartbeats, resume and backoff, interactions, components. It has no dependencies of its own |
 | [`@anthropic-ai/sdk`](https://github.com/anthropics/anthropic-sdk-typescript) | Anthropic's official client: request types, retries, typed errors |
 | [`openai`](https://github.com/openai/openai-node) | OpenAI's official client, which also serves every OpenAI-compatible server |
+| [`sharp`](https://sharp.pixelplumbing.com) | Image processing: downscales large images and extracts frames from animated GIFs to satisfy AI provider limits |
 | [`zod`](https://zod.dev) | Validates the configuration and each tool's input, and produces the JSON Schemas the model sees from the same definitions |
 
 There are no other runtime dependencies. HTTP uses Node's `fetch`, time zones

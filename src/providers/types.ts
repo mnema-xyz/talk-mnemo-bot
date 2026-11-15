@@ -23,6 +23,12 @@ export interface ToolResult {
   isError: boolean
 }
 
+export interface MediaAttachment {
+  type: 'image' | 'document'
+  mediaType: string
+  data: string // base64
+}
+
 /**
  * A turn of the conversation, in the order the model saw it.
  *
@@ -32,7 +38,7 @@ export interface ToolResult {
  * the engine never looks inside it.
  */
 export type Turn =
-  | { role: 'user'; text: string }
+  | { role: 'user'; text: string; attachments?: MediaAttachment[] | undefined }
   | { role: 'assistant'; text: string; toolCalls: ToolCall[]; raw?: unknown }
   | { role: 'tool'; results: ToolResult[] }
 

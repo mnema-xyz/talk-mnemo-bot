@@ -87,7 +87,21 @@ function toMessages(turns: Turn[]): Msg[] {
   const out: Msg[] = []
   for (const t of turns) {
     if (t.role === 'user') {
-      out.push({ role: 'user', content: t.text })
+      if (t.attachments && t.attachments.length > 0) {
+        const parts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = []
+        for (const att of t.attachments) {
+          if (att.type === 'image') {
+            parts.push({
+              type: 'image_url',
+              image_url: { url: `data:${att.mediaType};base64,${att.data}` },
+            })
+          }
+        }
+        parts.push({ type: 'text', text: t.text })
+        out.push({ role: 'user', content: parts })
+      } else {
+        out.push({ role: 'user', content: t.text })
+      }
     } else if (t.role === 'assistant') {
       out.push({
         role: 'assistant',

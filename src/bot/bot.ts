@@ -7,11 +7,14 @@ import {
   ActivityType,
   button,
   ButtonStyle,
+  MaxBytesExceededError,
   modal,
+  NotFoundError,
   RestError,
   textInput,
   TextInputStyle,
   type AllowedMentions,
+  type Attachment,
   type Client,
   type Interaction,
   type Message,
@@ -21,6 +24,16 @@ import { OncePerWindow, type Budget } from '../engine/limits.ts'
 import { boundHistory, LruMap, type HistoryTurn, type ThreadLimits } from '../engine/memory.ts'
 import { splitMessage } from '../engine/split.ts'
 import type { Logger } from '../log.ts'
+import type { MediaAttachment } from '../providers/types.ts'
+import {
+  classifyAttachment,
+  consentButtons,
+  consentPromptText,
+  extractPdfText,
+  processImage,
+  readStreamWithCap,
+  type AttachmentClassification,
+} from './attachments.ts'
 import { commandsFor } from './commands.ts'
 import { customId, detailsFrom, detailsText, parseCustomId, type AnswerDetails } from './delivery.ts'
 
@@ -35,6 +48,26 @@ export interface BotSettings {
   replyInThread: boolean
   sendDisplayName: boolean
   thread: ThreadLimits & { ttlMs: number }
+  vision?: boolean | undefined
+  attachments?: {
+    enabled: boolean
+    maxBytes: number
+    askConsent: boolean
+    providerName?: string | undefined
+    local?: boolean | undefined
+  } | undefined
+}
+
+interface ConsentRecord {
+  askerId: string
+  askerName: string
+  channelId: string
+  threadId?: string | undefined
+  message: Message
+  attachment: Attachment
+  classification: AttachmentClassification
+  consentMessageId?: string | undefined
+  timer?: NodeJS.Timeout | undefined
 }
 
 /** What a button needs to know about the answer it sits under. */
@@ -64,6 +97,7 @@ export class MnemoBot {
   private selfHandle = ''
   private readonly threads: LruMap<HistoryTurn[]>
   private readonly answers = new LruMap<AnswerRecord>(MAX_ANSWERS, 24 * 3600_000)
+  private readonly consents = new LruMap<ConsentRecord>(1000, 10 * 60_000)
   /** The last public answer per channel, for /details. */
   private readonly lastAnswer = new LruMap<string>(MAX_ANSWERS, 24 * 3600_000)
   /** Who was already told about a limit in this window. */
@@ -120,7 +154,9 @@ export class MnemoBot {
   // ---- mentions and threads ------------------------------------------------
 
   private async onMessage(m: Message): Promise<void> {
-    if (!this.selfId || m.user_id === this.selfId || m.is_bot || !m.content.trim()) return
+    if (!this.selfId || m.user_id === this.selfId || m.is_bot) return
+    const atts = (m as { attachments?: Attachment[] }).attachments ?? []
+    if (!m.content.trim() && atts.length === 0) return
     if (!this.allowed(m.channel_id)) return
 
     const mentioned = m.mentions.includes(this.selfId)
@@ -132,6 +168,37 @@ export class MnemoBot {
     const threadId = m.parent_id ?? (this.s.replyInThread ? m.id : undefined)
     const where = threadId ? { parent_id: threadId } : { message_reference: { message_id: m.id } }
 
+    const attachment = await this.findAttachment(m)
+    if (attachment) {
+      if (this.s.attachments?.enabled === false) {
+        await this.post(m.channel_id, "I can't read attachments.", undefined, where)
+        return
+      }
+      const size = attachment.size_bytes || (attachment.size ?? 0)
+      const maxBytes = this.s.attachments?.maxBytes ?? 10 * 1024 * 1024
+      if (size > maxBytes) {
+        const mb = (size / (1024 * 1024)).toFixed(1).replace(/\.0$/, '')
+        await this.post(m.channel_id, `This file is ${mb} MB; I can only read attachments up to 10 MB.`, undefined, where)
+        return
+      }
+      const classification = classifyAttachment(attachment)
+      if (classification.type === 'unsupported') {
+        await this.post(m.channel_id, `I can't read ${classification.fileType} files yet.`, undefined, where)
+        return
+      }
+      if (classification.type === 'image' && this.s.vision === false) {
+        await this.post(m.channel_id, 'The configured model does not support image input.', undefined, where)
+        return
+      }
+      const askConsent = this.s.attachments?.askConsent ?? true
+      if (askConsent) {
+        await this.askConsent(m, threadId, where, attachment, classification)
+        return
+      }
+      await this.serial(threadId ?? m.id, () => this.answerWithAttachment(m, threadId, attachment, classification))
+      return
+    }
+
     // Limits are checked before queueing, so a flood neither queues up nor
     // gets one public refusal per message: the member hears it once.
     const refused = this.engine.admit(m.user_id, m.channel_id)
@@ -142,13 +209,177 @@ export class MnemoBot {
     await this.serial(threadId ?? m.id, () => this.answerMessage(m, threadId))
   }
 
-  private async answerMessage(m: Message, threadId: string | undefined): Promise<void> {
-    const question = this.stripMention(m.content)
+  private async findAttachment(m: Message): Promise<Attachment | undefined> {
+    const atts = (m as { attachments?: Attachment[] }).attachments ?? []
+    if (atts.length > 0) return atts[0]
+    const replyId = m.reply_to_id ?? m.reply_to?.id
+    if (!replyId) return undefined
+    try {
+      const ref = await this.client.rest.getMessage(m.channel_id, replyId)
+      const refAtts = (ref as { attachments?: Attachment[] }).attachments ?? []
+      if (refAtts.length > 0) return refAtts[0]
+    } catch {
+      // If fetching reply fails, ignore
+    }
+    return undefined
+  }
+
+  private async askConsent(
+    m: Message,
+    threadId: string | undefined,
+    where: { parent_id: string } | { message_reference: { message_id: string } },
+    attachment: Attachment,
+    classification: AttachmentClassification,
+  ): Promise<void> {
+    const consentId = randomBytes(9).toString('base64url')
+    const providerName =
+      this.s.attachments?.providerName ??
+      (this.engine.providerName === 'anthropic' ? 'Anthropic' : this.engine.providerName === 'openai' ? 'OpenAI' : 'the AI provider')
+    const isLocal = this.s.attachments?.local ?? (this.engine.providerName === 'openai-compatible' && !this.s.attachments?.providerName)
+    const text = consentPromptText(classification, providerName, isLocal)
+    const components = consentButtons(consentId)
+    const sentMsg = await this.client.rest.createMessage(m.channel_id, {
+      content: text,
+      ...where,
+      components,
+      allowed_mentions: NO_PINGS,
+    })
+    const timer = setTimeout(() => {
+      this.consents.delete(consentId)
+      if (sentMsg.id) {
+        void this.client.rest.editMessage(m.channel_id, sentMsg.id, { components: [] }).catch(() => undefined)
+      }
+    }, 10 * 60_000)
+    timer.unref()
+    this.consents.set(consentId, {
+      askerId: m.user_id,
+      askerName: m.display_name || m.username,
+      channelId: m.channel_id,
+      threadId,
+      message: m,
+      attachment,
+      classification,
+      consentMessageId: sentMsg.id,
+      timer,
+    })
+  }
+
+  private async onConsent(i: Interaction, kind: 'consent_yes' | 'consent_no', consentId: string): Promise<void> {
+    const consent = this.consents.get(consentId)
+    if (!consent) {
+      await i.reply({ content: 'This question is too old for that now. Ask me again.', ephemeral: true, allowed_mentions: NO_PINGS })
+      return
+    }
+    if (i.user.id !== consent.askerId) {
+      await i.reply({ content: `Only ${consent.askerName} can answer this.`, ephemeral: true, allowed_mentions: NO_PINGS })
+      return
+    }
+    if (consent.timer) clearTimeout(consent.timer)
+    this.consents.delete(consentId)
+
+    if (kind === 'consent_no') {
+      await i.deferUpdate()
+      await i.editReply({ content: "Okay, I won't look at it.", components: [] }).catch(() => undefined)
+      return
+    }
+
+    await i.deferUpdate()
+    await i.editReply({ components: [] }).catch(() => undefined)
+    await this.serial(consent.threadId ?? consent.message.id, () =>
+      this.answerWithAttachment(consent.message, consent.threadId, consent.attachment, consent.classification),
+    )
+  }
+
+  private async answerWithAttachment(
+    m: Message,
+    threadId: string | undefined,
+    attachment: Attachment,
+    classification: AttachmentClassification,
+  ): Promise<void> {
+    const where = threadId ? { parent_id: threadId } : { message_reference: { message_id: m.id } }
+    const processed = await this.downloadAndProcess(m, attachment, classification, where)
+    if (!processed) return
+
+    let question = this.stripMention(m.content)
+    if (processed.textPrefix) {
+      question = question ? `${processed.textPrefix}\n\n${question}` : processed.textPrefix
+    }
+    if (!question) {
+      question = classification.type === 'image' ? 'Describe this image.' : 'Describe this file.'
+    }
+    await this.sendAnswer(m, threadId, question, processed.attachments)
+  }
+
+  private async downloadAndProcess(
+    m: Message,
+    attachment: Attachment,
+    classification: AttachmentClassification,
+    where: { parent_id: string } | { message_reference: { message_id: string } },
+  ): Promise<{ attachments?: MediaAttachment[]; textPrefix?: string } | undefined> {
+    const maxBytes = this.s.attachments?.maxBytes ?? 10 * 1024 * 1024
+    let buffer: Buffer
+    let contentType = attachment.content_type || attachment.mime_type
+    await this.react(m, true)
+    try {
+      const downloaded = await this.client.rest.downloadAttachment(attachment.id, {
+        maxBytes,
+        signal: AbortSignal.timeout(30_000),
+      })
+      buffer = await readStreamWithCap(downloaded.stream, maxBytes)
+      if (downloaded.contentType) contentType = downloaded.contentType
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        await this.post(m.channel_id, 'Reading attachments requires Talk 3.3 or newer.', undefined, where)
+        return undefined
+      }
+      if (err instanceof MaxBytesExceededError) {
+        await this.post(m.channel_id, 'This file is too large; I can only read attachments up to 10 MB.', undefined, where)
+        return undefined
+      }
+      this.log.warn('attachment_download_failed', { error: err })
+      await this.post(m.channel_id, 'Sorry, I could not download the attachment. Try again in a moment.', undefined, where)
+      return undefined
+    } finally {
+      await this.react(m, false)
+    }
+
+    this.log.info('attachment_read', { type: contentType, size: buffer.length })
+
+    if (classification.type === 'image') {
+      try {
+        const processed = await processImage(buffer, contentType)
+        return { attachments: [{ type: 'image', mediaType: processed.mediaType, data: processed.data }] }
+      } catch (err) {
+        this.log.warn('image_processing_failed', { error: err })
+        await this.post(m.channel_id, 'Sorry, I could not process that image.', undefined, where)
+        return undefined
+      }
+    }
+    if (classification.type === 'pdf') {
+      if (this.engine.providerName === 'anthropic') {
+        return { attachments: [{ type: 'document', mediaType: 'application/pdf', data: buffer.toString('base64') }] }
+      }
+      const extracted = extractPdfText(buffer)
+      const fname = attachment.original_filename || attachment.filename || 'document.pdf'
+      return { textPrefix: `Attachment (${fname}):\n${extracted || '[No extractable text]'}` }
+    }
+    if (classification.type === 'text') {
+      let text = buffer.toString('utf-8')
+      if (text.length > 40_000) text = `${text.slice(0, 40_000)}\n\n[... content truncated ...]`
+      const fname = attachment.original_filename || attachment.filename || 'file'
+      return { textPrefix: `Attachment (${fname}):\n\`\`\`\n${text}\n\`\`\`` }
+    }
+    return undefined
+  }
+
+  private async sendAnswer(
+    m: Message,
+    threadId: string | undefined,
+    question: string,
+    attachments?: MediaAttachment[],
+  ): Promise<void> {
     const known = threadId ? this.threads.get(threadId) : undefined
     const history = known ?? []
-    // Mnemo follows the threads it starts (under a question in the channel)
-    // and those it already follows; a mention in someone else's thread gets
-    // one answer, without Mnemo reading along from then on.
     const follow = threadId !== undefined && (threadId === m.id || known !== undefined)
     await this.react(m, true)
     try {
@@ -158,6 +389,7 @@ export class MnemoBot {
         userId: m.user_id,
         channelId: m.channel_id,
         askerName: m.display_name || m.username,
+        attachments,
         admitted: true,
       })
       const answerId = this.remember(result, { question, history, askerId: m.user_id, channelId: m.channel_id, threadId, ephemeral: false, regenerations: 0 })
@@ -169,6 +401,11 @@ export class MnemoBot {
     } finally {
       await this.react(m, false)
     }
+  }
+
+  private async answerMessage(m: Message, threadId: string | undefined): Promise<void> {
+    const question = this.stripMention(m.content)
+    await this.sendAnswer(m, threadId, question)
   }
 
   /** Removes "@mnemo" from the question; the model does not need it. */
@@ -218,6 +455,9 @@ export class MnemoBot {
     if (i.isCommand() && i.commandName === 'details') return this.onDetails(i)
     const id = i.isButton() || i.isModalSubmit() ? parseCustomId(i.customId) : undefined
     if (!id) return
+    if (id.kind === 'consent_yes' || id.kind === 'consent_no') {
+      return this.onConsent(i, id.kind, id.answerId)
+    }
     if (i.isModalSubmit() && id.kind === 'followup') return this.onFollowUpSubmit(i, id.answerId)
     const rec = this.answers.get(id.answerId)
     if (!rec) {
@@ -420,6 +660,6 @@ export class MnemoBot {
 
   /** For the health endpoint. */
   stats(): Record<string, number> {
-    return { threads: this.threads.size, answers: this.answers.size }
+    return { threads: this.threads.size, answers: this.answers.size, consents: this.consents.size }
   }
 }

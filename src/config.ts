@@ -51,6 +51,16 @@ export const SettingsSchema = z.object({
   healthHost: z.string().default('127.0.0.1'),
   dataDir: z.string().min(1).default('data'),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  vision: bool.default(true),
+  attachments: z
+    .object({
+      enabled: bool.default(true),
+      maxBytes: int(1, 10 * 1024 * 1024).default(10 * 1024 * 1024),
+      askConsent: bool.default(true),
+      providerName: z.string().optional(),
+      local: bool.default(false),
+    })
+    .default({ enabled: true, maxBytes: 10 * 1024 * 1024, askConsent: true, local: false }),
 })
 
 /** Environment variable for each setting. */
@@ -86,6 +96,8 @@ export const ENV: Record<keyof z.input<typeof SettingsSchema>, string> = {
   healthHost: 'MNEMO_HEALTH_HOST',
   dataDir: 'MNEMO_DATA_DIR',
   logLevel: 'MNEMO_LOG_LEVEL',
+  vision: 'MNEMO_VISION',
+  attachments: 'MNEMO_ATTACHMENTS',
 }
 
 /** Secrets: each from `NAME` or from the file named by `NAME_FILE`. */
@@ -187,6 +199,23 @@ export function loadConfig(env: Env = process.env): Config {
     const v = env[name]
     if (v !== undefined && v.trim() !== '') merged[key] = v.trim()
   }
+
+  let attObj: Record<string, unknown> = {}
+  if (typeof merged.attachments === 'string') {
+    try {
+      attObj = JSON.parse(merged.attachments) as Record<string, unknown>
+    } catch {
+      problems.push('MNEMO_ATTACHMENTS: must be valid JSON')
+    }
+  } else if (typeof merged.attachments === 'object' && merged.attachments !== null) {
+    attObj = { ...(merged.attachments as Record<string, unknown>) }
+  }
+  if (env.MNEMO_ATTACHMENTS_ENABLED !== undefined) attObj.enabled = env.MNEMO_ATTACHMENTS_ENABLED.trim()
+  if (env.MNEMO_ATTACHMENTS_MAX_BYTES !== undefined) attObj.maxBytes = env.MNEMO_ATTACHMENTS_MAX_BYTES.trim()
+  if (env.MNEMO_ATTACHMENTS_ASK_CONSENT !== undefined) attObj.askConsent = env.MNEMO_ATTACHMENTS_ASK_CONSENT.trim()
+  if (env.MNEMO_ATTACHMENTS_PROVIDER_NAME !== undefined) attObj.providerName = env.MNEMO_ATTACHMENTS_PROVIDER_NAME.trim()
+  if (env.MNEMO_ATTACHMENTS_LOCAL !== undefined) attObj.local = env.MNEMO_ATTACHMENTS_LOCAL.trim()
+  merged.attachments = attObj
 
   const parsed = SettingsSchema.safeParse(merged)
   if (!parsed.success) {
