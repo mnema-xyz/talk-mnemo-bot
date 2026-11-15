@@ -59,7 +59,22 @@ function toInput(turns: Turn[]): Item[] {
   const out: Item[] = []
   for (const t of turns) {
     if (t.role === 'user') {
-      out.push({ role: 'user', content: t.text })
+      if (t.attachments && t.attachments.length > 0) {
+        const parts: OpenAI.Responses.ResponseInputContent[] = []
+        for (const att of t.attachments) {
+          if (att.type === 'image') {
+            parts.push({
+              type: 'input_image',
+              image_url: `data:${att.mediaType};base64,${att.data}`,
+              detail: 'auto',
+            })
+          }
+        }
+        parts.push({ type: 'input_text', text: t.text })
+        out.push({ role: 'user', content: parts })
+      } else {
+        out.push({ role: 'user', content: t.text })
+      }
     } else if (t.role === 'assistant') {
       if (Array.isArray(t.raw)) out.push(...(t.raw as Item[]))
       else out.push({ role: 'assistant', content: t.text })

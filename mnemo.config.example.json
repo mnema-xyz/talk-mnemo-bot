@@ -10,5 +10,11 @@
   "channelLimitPerMinute": 20,
   "dailyTokenBudget": 1000000,
   "maxToolCalls": 6,
-  "threadMaxTurns": 12
+  "threadMaxTurns": 12,
+  "attachments": {
+    "enabled": true,
+    "maxBytes": 10485760,
+    "askConsent": true,
+    "local": false
+  }
 }

@@ -2,7 +2,7 @@
 // loop, the limits and the budget, and knows nothing about Mnema Talk, so
 // it is tested without a server and reusable in another chat.
 import type { Logger } from '../log.ts'
-import { ProviderError, type Provider, type ToolCall, type Turn, type Usage } from '../providers/types.ts'
+import { ProviderError, type MediaAttachment, type Provider, type ToolCall, type Turn, type Usage } from '../providers/types.ts'
 import { runTool, toolSpecs } from '../tools/index.ts'
 import type { Tool, ToolContext } from '../tools/types.ts'
 import { Budget, RateLimiter } from './limits.ts'
@@ -48,6 +48,7 @@ export interface AskInput {
   userId: string
   channelId: string
   askerName?: string | undefined
+  attachments?: MediaAttachment[] | undefined
   /** Set when `admit()` already let this question in. */
   admitted?: boolean
 }
@@ -79,6 +80,10 @@ export class Engine {
 
   get model(): string {
     return this.d.provider.model
+  }
+
+  get providerName(): string {
+    return this.d.provider.name
   }
 
   /**
@@ -119,7 +124,7 @@ export class Engine {
     const specs = s.maxToolCalls > 0 ? toolSpecs(this.d.tools) : []
     const turns: Turn[] = [
       ...input.history.map((h): Turn => (h.role === 'user' ? { role: 'user', text: h.text } : { role: 'assistant', text: h.text, toolCalls: [] })),
-      { role: 'user', text: question },
+      { role: 'user', text: question, ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments } : {}) },
     ]
     const usage: Usage = { inputTokens: 0, outputTokens: 0 }
     const toolsUsed: ToolUse[] = []
@@ -250,6 +255,7 @@ function turnsTokens(turns: Turn[]): number {
   for (const t of turns) {
     if (t.role === 'tool') for (const r of t.results) n += estimateTokens(r.content)
     else n += estimateTokens(t.text)
+    if (t.role === 'user' && t.attachments) n += t.attachments.length * 1600
     if (t.role === 'assistant') n += estimateTokens(JSON.stringify(t.toolCalls)) + (t.raw === undefined ? 0 : estimateTokens(JSON.stringify(t.raw)))
   }
   return n

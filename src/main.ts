@@ -70,6 +70,8 @@ const bot = new MnemoBot(
     replyInThread: config.replyInThread,
     sendDisplayName: config.sendDisplayName,
     thread: { maxTurns: config.threadMaxTurns, maxChars: config.threadMaxChars, ttlMs: config.threadTtlHours * 3600_000 },
+    vision: config.vision,
+    attachments: config.attachments,
   },
   log,
 )

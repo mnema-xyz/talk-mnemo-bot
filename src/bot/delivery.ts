@@ -4,14 +4,14 @@ import type { AskResult, ToolUse } from '../engine/engine.ts'
 
 export const ID_PREFIX = 'mnemo'
 
-export type ButtonKind = 'regen' | 'follow'
+export type ButtonKind = 'regen' | 'follow' | 'consent_yes' | 'consent_no'
 
 export function customId(kind: ButtonKind | 'followup', answerId: string): string {
   return `${ID_PREFIX}:${kind}:${answerId}`
 }
 
 export function parseCustomId(id: string): { kind: string; answerId: string } | undefined {
-  const m = /^mnemo:([a-z]+):([A-Za-z0-9_-]{1,40})$/.exec(id)
+  const m = /^mnemo:([a-z_]+):([A-Za-z0-9_-]{1,40})$/.exec(id)
   return m ? { kind: m[1] ?? '', answerId: m[2] ?? '' } : undefined
 }
 

@@ -106,10 +106,40 @@ function toMessages(turns: Turn[], context?: string): Anthropic.MessageParam[] {
   const last = turns.findLastIndex((t) => t.role === 'user')
   for (const [i, t] of turns.entries()) {
     if (t.role === 'user') {
-      out.push({
-        role: 'user',
-        content: i === last && context ? [{ type: 'text', text: `Context from the chat (not written by the user):\n${context}` }, { type: 'text', text: t.text }] : t.text,
-      })
+      if (t.attachments && t.attachments.length > 0) {
+        const parts: Anthropic.ContentBlockParam[] = []
+        if (i === last && context) {
+          parts.push({ type: 'text', text: `Context from the chat (not written by the user):\n${context}` })
+        }
+        for (const att of t.attachments) {
+          if (att.type === 'image') {
+            parts.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: att.mediaType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+                data: att.data,
+              },
+            })
+          } else {
+            parts.push({
+              type: 'document',
+              source: {
+                type: 'base64',
+                media_type: 'application/pdf',
+                data: att.data,
+              },
+            })
+          }
+        }
+        parts.push({ type: 'text', text: t.text })
+        out.push({ role: 'user', content: parts })
+      } else {
+        out.push({
+          role: 'user',
+          content: i === last && context ? [{ type: 'text', text: `Context from the chat (not written by the user):\n${context}` }, { type: 'text', text: t.text }] : t.text,
+        })
+      }
     } else if (t.role === 'assistant') {
       if (t.raw !== undefined) {
         out.push({ role: 'assistant', content: t.raw as Anthropic.ContentBlockParam[] })
