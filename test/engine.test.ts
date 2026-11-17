@@ -19,10 +19,10 @@ const settings: EngineSettings = {
 }
 
 const recorded = (url: string | URL | Request): Promise<Response> => {
-  const u = url instanceof Request ? url.url : url.toString()
-  if (u.includes('geocoding-api')) return Promise.resolve(Response.json(fixture('open-meteo-geocode-marbella.json')))
-  if (u.includes('api.open-meteo.com')) return Promise.resolve(Response.json(fixture('open-meteo-forecast-marbella.json')))
-  return Promise.reject(new Error(`unexpected request: ${u}`))
+  const u = new URL(url instanceof Request ? url.url : url.toString())
+  if (u.hostname === 'geocoding-api.open-meteo.com') return Promise.resolve(Response.json(fixture('open-meteo-geocode-marbella.json')))
+  if (u.hostname === 'api.open-meteo.com') return Promise.resolve(Response.json(fixture('open-meteo-forecast-marbella.json')))
+  return Promise.reject(new Error(`unexpected request: ${u.href}`))
 }
 
 function engine(provider: Provider, over: Partial<EngineSettings> = {}, budget = new Budget({ dailyTokens: 0, dailyCostUsd: 0, inputUsdPerMTok: 0, outputUsdPerMTok: 0 })) {
