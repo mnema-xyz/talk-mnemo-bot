@@ -17,8 +17,15 @@ const Tavily = z.object({
   results: z.array(z.object({ title: z.string(), url: z.string(), content: z.string().optional() })),
 })
 
-const clip = (s: string | undefined): string =>
-  (s ?? '').replace(/<[^>]+>/g, '').slice(0, MAX_SNIPPET)
+const clip = (s: string | undefined): string => {
+  let text = s ?? ''
+  let prev: string
+  do {
+    prev = text
+    text = text.replace(/<[^>]+>/g, '')
+  } while (text !== prev)
+  return text.slice(0, MAX_SNIPPET)
+}
 
 export function webSearch(backend: SearchBackend, apiKey: string): Tool {
   return defineTool({
