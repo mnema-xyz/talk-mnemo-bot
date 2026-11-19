@@ -189,8 +189,12 @@ the message it replies to:
   - Images (`png`, `jpeg`, `webp`, `gif` first frame) are sent to vision-capable
     models, downscaled automatically to fit provider limits (e.g. Anthropic's 5 MB
     and 8000 px limit).
-  - PDFs have text extracted (or sent as document blocks to Anthropic).
+  - PDFs have text extracted (or sent as document blocks to Anthropic). The
+    extraction reads plain text from the PDF's content streams and skips a
+    stream that would inflate to more than 4 MB.
   - Text files (`txt`, `md`, `csv`, `json`, `log`, and source code) are read as text.
+  - Text from a file (a text file or a PDF's extracted text) is cut to 40,000
+    characters, and the cut is marked.
   - Unsupported files (archives, audio, video) are refused before downloading.
 - **Privacy**: Attachment data is never written to disk or kept in thread memory.
   Only Mnemo's text answer is retained.
