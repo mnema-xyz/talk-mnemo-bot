@@ -2,8 +2,8 @@
 // length of the text that goes to the provider.
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { deflateSync } from 'node:zlib'
-import { extractPdfText } from '../src/bot/attachments.ts'
+import { crc32, deflateSync } from 'node:zlib'
+import { extractPdfText, processImage } from '../src/bot/attachments.ts'
 import { MAX_TEXT_CHARS, TRUNCATED } from '../src/bot/attachments.ts'
 
 const pdfWith = (...streams: Buffer[]) =>
@@ -52,5 +52,35 @@ describe('PDF text extraction: bounds', () => {
   it('still reads strings and TJ arrays, with escapes', () => {
     const body = Buffer.from('BT (Total \\(net\\)) Tj [(Item) -250 (one)] TJ ET')
     assert.equal(extractPdfText(pdfWith(deflateSync(body))), 'Total (net) Item one')
+  })
+})
+
+/** A PNG chunk: length, type, data and CRC. */
+const chunk = (type: string, data: Buffer) => {
+  const typed = Buffer.concat([Buffer.from(type, 'latin1'), data])
+  const len = Buffer.alloc(4)
+  len.writeUInt32BE(data.length)
+  const crc = Buffer.alloc(4)
+  crc.writeUInt32BE(crc32(typed))
+  return Buffer.concat([len, typed, crc])
+}
+
+/** A few hundred bytes that declare a width x height RGB PNG. */
+const pngDeclaring = (width: number, height: number) => {
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(width, 0)
+  ihdr.writeUInt32BE(height, 4)
+  ihdr.set([8, 2, 0, 0, 0], 8)
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(Buffer.alloc(width * 3 + 1))),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
+}
+
+describe('image processing: bounds', () => {
+  it('refuses an image declaring 16000 x 16000 pixels before decoding it', async () => {
+    await assert.rejects(processImage(pngDeclaring(16_000, 16_000), 'image/png'), /pixel limit/)
   })
 })

@@ -188,7 +188,7 @@ the message it replies to:
 - **Supported types**:
   - Images (`png`, `jpeg`, `webp`, `gif` first frame) are sent to vision-capable
     models, downscaled automatically to fit provider limits (e.g. Anthropic's 5 MB
-    and 8000 px limit).
+    and 8000 px limit). Images of more than 40 megapixels are not read.
   - PDFs have text extracted (or sent as document blocks to Anthropic). The
     extraction reads plain text from the PDF's content streams and skips a
     stream that would inflate to more than 4 MB.

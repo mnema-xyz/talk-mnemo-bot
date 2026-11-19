@@ -110,11 +110,15 @@ export async function readStreamWithCap(
   return Buffer.concat(chunks)
 }
 
+/** Images with more pixels than this are not read (about 40 megapixels). */
+const MAX_INPUT_PIXELS = 40_000_000
+
 export async function processImage(
   buffer: Buffer,
   mimeType: string,
 ): Promise<{ data: string; mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' }> {
-  let s = sharp(buffer, { pages: 1 })
+  // Larger images are refused from their header, before they are decoded.
+  let s = sharp(buffer, { pages: 1, limitInputPixels: MAX_INPUT_PIXELS })
   const meta = await s.metadata()
   const MAX_PX = 8000
   const MAX_BYTES = 4.5 * 1024 * 1024
