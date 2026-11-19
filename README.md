@@ -178,8 +178,9 @@ the message it replies to:
   the prompt states that the file stays on this server and will be processed by
   the local model. Consent can be disabled with `MNEMO_ATTACHMENTS_ASK_CONSENT=false`.
 - **Limits apply**: The consent prompt and the accepted answer each count as a
-  question against the member and channel rate limits, and nothing is offered or
-  downloaded once the daily budget is used up. A **Yes** over the limit is refused
+  question against the member and channel rate limits, and so does a refusal
+  (a file type Mnemo cannot read, a file too large, attachments switched off).
+  Nothing is offered or downloaded once the daily budget is used up. A **Yes** over the limit is refused
   privately and the prompt stays, so the asker can try again later.
 - **Size limit**: Attachments up to `MNEMO_ATTACHMENTS_MAX_BYTES` are read
   (10 MB by default, and at most). The size is checked from metadata before

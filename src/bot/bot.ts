@@ -124,11 +124,12 @@ export class MnemoBot {
   private async onAttachment(m: Message, threadId: string | undefined, where: Where, found: FoundAttachment): Promise<void> {
     const { attachment } = found
     const classification = classifyAttachment(attachment)
+    // A refusal or a consent prompt counts against the limits like a
+    // question, so a flood of attachment mentions neither posts one reply
+    // each nor skips them.
+    if (await this.refusedInChannel(m, where)) return
     const refusal = attachmentRefusal(this.s, attachment, classification)
     if (refusal) return post(this.client, m.channel_id, refusal, undefined, where)
-    // A consent prompt counts against the limits like a question, so a flood
-    // of attachment mentions neither posts one prompt each nor skips them.
-    if (await this.refusedInChannel(m, where)) return
     if (this.s.attachments?.askConsent ?? true) return this.consents.ask(m, threadId, where, found, classification)
     await this.serial(threadId ?? m.id, () => this.answerWithAttachment(m, threadId, attachment, classification))
   }
