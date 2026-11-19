@@ -16,14 +16,18 @@ export interface ReadAttachment {
 /** Text files are cut to this many characters. */
 const MAX_TEXT_CHARS = 40_000
 
+/** A size for a member: MB with one decimal (none when it is .0), KB or bytes below that. */
+export function sizeText(bytes: number): string {
+  const [unit, div] = bytes >= 1024 * 1024 ? ['MB', 1024 * 1024] : bytes >= 1024 ? ['KB', 1024] : ['bytes', 1]
+  return `${(bytes / div).toFixed(1).replace(/\.0$/, '')} ${unit}`
+}
+
 /** Why an attachment is not read, before anything is downloaded. */
 export function attachmentRefusal(s: BotSettings, attachment: Attachment, classification: AttachmentClassification): string | undefined {
   if (s.attachments?.enabled === false) return "I can't read attachments."
   const size = attachment.size_bytes || (attachment.size ?? 0)
-  if (size > maxAttachmentBytes(s)) {
-    const mb = (size / (1024 * 1024)).toFixed(1).replace(/\.0$/, '')
-    return `This file is ${mb} MB; I can only read attachments up to 10 MB.`
-  }
+  const max = maxAttachmentBytes(s)
+  if (size > max) return `This file is ${sizeText(size)}; I can only read attachments up to ${sizeText(max)}.`
   if (classification.type === 'unsupported') return `I can't read ${classification.fileType} files yet.`
   if (classification.type === 'image' && s.vision === false) return 'The configured model does not support image input.'
   return undefined
@@ -45,7 +49,7 @@ export async function downloadFile(d: ReaderDeps, attachment: Attachment): Promi
     return { buffer, contentType: downloaded.contentType || attachment.content_type || attachment.mime_type }
   } catch (err) {
     if (err instanceof NotFoundError) return 'Reading attachments requires Talk 3.3 or newer.'
-    if (err instanceof MaxBytesExceededError) return 'This file is too large; I can only read attachments up to 10 MB.'
+    if (err instanceof MaxBytesExceededError) return `This file is too large; I can only read attachments up to ${sizeText(d.maxBytes)}.`
     d.log.warn('attachment_download_failed', { error: err })
     return 'Sorry, I could not download the attachment. Try again in a moment.'
   }

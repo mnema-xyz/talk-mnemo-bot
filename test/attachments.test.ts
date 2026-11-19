@@ -195,6 +195,21 @@ describe('attachment size limit', () => {
     assert.match(t.posted[0]?.content ?? '', /This file is 15 MB; I can only read attachments up to 10 MB\./)
   })
 
+  it('names the configured limit, not the default, when it refuses', async () => {
+    const t = setupBot({ attachments: { enabled: true, maxBytes: 2 * 1024 * 1024, askConsent: true } })
+    await t.emitMessage(fileMention(1, 'u1', 'c1', 3 * 1024 * 1024))
+    assert.equal(t.downloadCalls.length, 0)
+    assert.equal(textOf(t.posted[0]), 'This file is 3 MB; I can only read attachments up to 2 MB.')
+  })
+
+  it('names the configured limit when a lying size is cut off while streaming', async () => {
+    const t = setupBot({ attachments: { enabled: true, maxBytes: 512 * 1024, askConsent: false } }, {
+      download: () => Promise.resolve({ contentType: 'text/plain', size: 20, filename: 'file.txt', stream: makeStream([new Uint8Array(600 * 1024)]) }),
+    })
+    await t.emitMessage(fileMention(1))
+    assert.equal(textOf(t.posted[0]), 'This file is too large; I can only read attachments up to 512 KB.')
+  })
+
   it('a lying size is cut off while streaming', async () => {
     const largeChunk = new Uint8Array(2 * 1024 * 1024)
     // 6 chunks of 2 MB = 12 MB, exceeding the 10 MB limit
@@ -344,7 +359,7 @@ describe('consent flow: No, wording and no consent', () => {
 })
 
 /** An attachment mention of a small text file, as `user` in `channel`. */
-function fileMention(n: number, user = 'u1', channel = 'c1') {
+function fileMention(n: number, user = 'u1', channel = 'c1', size = 20) {
   return {
     id: `m${n}`,
     channel_id: channel,
@@ -352,7 +367,7 @@ function fileMention(n: number, user = 'u1', channel = 'c1') {
     username: user,
     mentions: ['bot_id'],
     content: '<@bot_id> read this',
-    attachments: [{ id: `att${n}`, filename: 'file.txt', mime_type: 'text/plain', size_bytes: 20 }],
+    attachments: [{ id: `att${n}`, filename: 'file.txt', mime_type: 'text/plain', size_bytes: size }],
   }
 }
 
