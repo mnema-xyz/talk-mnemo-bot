@@ -60,6 +60,7 @@ function setupBot(
     getMessage?: (channelId: string, messageId: string) => Promise<unknown>
   } = {},
   fakeSteps: Parameters<typeof fakeProvider>[0] = [],
+  limits: { member?: number; channel?: number; budget?: Budget } = {},
 ) {
   const events = new EventEmitter()
   const posted: Sent[] = []
@@ -112,9 +113,9 @@ function setupBot(
       sendDisplayName: false,
       userAgent: 'Mnemo-test',
     },
-    memberLimit: new RateLimiter(100, 60_000),
-    channelLimit: new RateLimiter(100, 60_000),
-    budget: new Budget({ dailyTokens: 0, dailyCostUsd: 0, inputUsdPerMTok: 0, outputUsdPerMTok: 0 }),
+    memberLimit: new RateLimiter(limits.member ?? 100, 60_000),
+    channelLimit: new RateLimiter(limits.channel ?? 100, 60_000),
+    budget: limits.budget ?? new Budget({ dailyTokens: 0, dailyCostUsd: 0, inputUsdPerMTok: 0, outputUsdPerMTok: 0 }),
     log: silentLogger,
   })
 
@@ -332,6 +333,91 @@ describe('consent flow', () => {
     assert.equal(t.downloadCalls.length, 1, 'download was called directly without consent')
     assert.equal(t.posted.length, 1)
     assert.match(t.posted[0]?.content ?? '', /You asked/)
+  })
+})
+
+/** An attachment mention of a small text file, as `user` in `channel`. */
+function fileMention(n: number, user = 'u1', channel = 'c1') {
+  return {
+    id: `m${n}`,
+    channel_id: channel,
+    user_id: user,
+    username: user,
+    mentions: ['bot_id'],
+    content: '<@bot_id> read this',
+    attachments: [{ id: `att${n}`, filename: 'file.txt', mime_type: 'text/plain', size_bytes: 20 }],
+  }
+}
+
+const isPrompt = (s: Sent) => (s.components?.[0]?.components.length ?? 0) === 2
+const yesOf = (s: Sent | undefined) => s?.components?.[0]?.components[0]?.custom_id ?? ''
+
+describe('attachment questions and the limits', () => {
+  it('a flood of attachment mentions gets prompts only up to the member limit, and one refusal', async () => {
+    const t = setupBot({}, {}, [], { member: 2 })
+    for (let n = 1; n <= 6; n++) await t.emitMessage(fileMention(n))
+    assert.equal(t.posted.filter(isPrompt).length, 2)
+    const refusals = t.posted.filter((s) => !isPrompt(s))
+    assert.equal(refusals.length, 1)
+    assert.match(refusals[0]?.content ?? '', /You are asking quickly/)
+    assert.equal(t.downloadCalls.length, 0)
+  })
+
+  it('consent prompts count against the channel limit across members', async () => {
+    const t = setupBot({}, {}, [], { channel: 2 })
+    for (let n = 1; n <= 4; n++) await t.emitMessage(fileMention(n, `u${n}`))
+    assert.equal(t.posted.filter(isPrompt).length, 2)
+    assert.match(t.posted.at(-1)?.content ?? '', /This channel is keeping me busy/)
+  })
+
+  it('an accepted call is admitted too: a Yes over the limit downloads nothing and keeps the prompt', async () => {
+    const t = setupBot({}, {}, [], { member: 1 })
+    await t.emitMessage(fileMention(1))
+    const yesId = yesOf(t.posted[0])
+    const refused = fakeBtn(yesId, 'u1')
+    await t.run(refused.i)
+    assert.equal(t.downloadCalls.length, 0, 'no download over the limit')
+    assert.equal(refused.sent[0]?.ephemeral, true)
+    assert.match(refused.sent[0]?.content ?? '', /You are asking quickly/)
+    assert.equal(t.posted.length, 1, 'no answer is posted')
+  })
+
+  it('a flood of Yes clicks on many prompts answers only within the limit', async () => {
+    const t = setupBot({}, {}, [], { member: 4 })
+    for (let n = 1; n <= 2; n++) await t.emitMessage(fileMention(n))
+    const prompts = t.posted.filter(isPrompt)
+    assert.equal(prompts.length, 2)
+    // Two prompts and two accepted calls use the four slots; a third prompt is refused.
+    for (const p of prompts) await t.run(fakeBtn(yesOf(p), 'u1').i)
+    assert.equal(t.downloadCalls.length, 2)
+    await t.emitMessage(fileMention(3))
+    assert.equal(t.posted.filter(isPrompt).length, 2)
+  })
+
+  it('a double click on Yes reads the file once', async () => {
+    const t = setupBot()
+    await t.emitMessage(fileMention(1))
+    const yesId = yesOf(t.posted[0])
+    t.events.emit('interactionCreate', fakeBtn(yesId, 'u1').i)
+    await t.run(fakeBtn(yesId, 'u1').i)
+    assert.equal(t.downloadCalls.length, 1)
+  })
+
+  it('without consent each attachment question is admitted before the download', async () => {
+    const t = setupBot({ attachments: { enabled: true, maxBytes: 10 * 1024 * 1024, askConsent: false } }, {}, [], { member: 2 })
+    for (let n = 1; n <= 5; n++) await t.emitMessage(fileMention(n))
+    assert.equal(t.downloadCalls.length, 2)
+    assert.equal(t.provider.requests.length, 2)
+  })
+
+  it('with the budget used up, an attachment is neither offered nor downloaded', async () => {
+    const budget = new Budget({ dailyTokens: 10, dailyCostUsd: 0, inputUsdPerMTok: 0, outputUsdPerMTok: 0 })
+    budget.add({ inputTokens: 10, outputTokens: 0 })
+    const t = setupBot({}, {}, [], { budget })
+    await t.emitMessage(fileMention(1))
+    assert.equal(t.downloadCalls.length, 0)
+    assert.equal(t.posted.length, 1)
+    assert.match(t.posted[0]?.content ?? '', /used up today's budget/)
   })
 })
 

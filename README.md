@@ -173,6 +173,10 @@ the message it replies to:
   using a local model (`attachments.local: true` / `MNEMO_ATTACHMENTS_LOCAL=true`),
   the prompt states that the file stays on this server and will be processed by
   the local model. Consent can be disabled with `MNEMO_ATTACHMENTS_ASK_CONSENT=false`.
+- **Limits apply**: The consent prompt and the accepted answer each count as a
+  question against the member and channel rate limits, and nothing is offered or
+  downloaded once the daily budget is used up. A **Yes** over the limit is refused
+  privately and the prompt stays, so the asker can try again later.
 - **Size limit**: Attachments up to 10 MB are supported. The size is checked
   from metadata before downloading; files over 10 MB are refused without downloading.
 - **Supported types**:
@@ -494,7 +498,8 @@ Guards keep a busy channel or a curious member from running up a bill:
 - **Rate limits**: 5 questions per member and 20 per channel per minute by
   default. Over the limit, Mnemo says how long to wait: privately for `/ask`
   and the buttons, and once per member and minute for mentions (further
-  mentions in that minute are dropped quietly).
+  mentions in that minute are dropped quietly). Attachment questions count
+  twice: once for the consent prompt and once for the accepted answer.
 - **Daily budget**: 1,000,000 tokens per UTC day by default (about $0.10 to
   $0.15 a day on Haiku if it is used up). Set `MNEMO_DAILY_COST_BUDGET_USD` for
   a limit in dollars. When it is used up, Mnemo says so and answers again
