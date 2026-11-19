@@ -255,7 +255,9 @@ describe('regeneration limit', () => {
     await t.run(asker.i)
     assert.ok(asker.sent.some((m) => m.content?.startsWith('You asked')))
   })
+})
 
+describe('regeneration limit: forged ids, double clicks and the budget', () => {
   it('refuses a forged Regenerate id once the limit is reached, and when it is 0', async () => {
     for (const max of [0, 1]) {
       const t = setup({ maxRegenerations: max })

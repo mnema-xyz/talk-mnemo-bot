@@ -65,6 +65,17 @@ export interface EngineDeps {
   now?: () => Date
 }
 
+interface Conversation {
+  system: string
+  context: string
+  specs: ReturnType<typeof toolSpecs>
+  turns: Turn[]
+  /** Estimated tokens of the system prompt, the context and the tool specs. */
+  fixedTokens: number
+  usage: Usage
+  toolsUsed: ToolUse[]
+}
+
 /** Rounds of model calls per question; a safety net above the tool limit. */
 const MAX_ROUNDS = 8
 
@@ -116,72 +127,86 @@ export class Engine {
       const refused = this.admit(input.userId, input.channelId)
       if (refused) return refused
     }
+    const conv = this.conversation(input, question)
+    let text = ''
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const step = await this.round(conv)
+      if (step.kind === 'refused') return round === 0 || step.reason !== 'budget' ? step : this.answered(conv, text)
+      text = step.text
+      if (step.kind === 'done') break
+    }
+    return this.answered(conv, text)
+  }
 
+  /** Everything one question sends, and what its calls add up to. */
+  private conversation(input: AskInput, question: string): Conversation {
     const s = this.d.settings
     const name = s.sendDisplayName ? cleanName(input.askerName) : undefined
     const system = buildSystemPrompt(s.persona)
     const context = buildContext(this.now(), name)
     const specs = s.maxToolCalls > 0 ? toolSpecs(this.d.tools) : []
+    const attachments = input.attachments && input.attachments.length > 0 ? { attachments: input.attachments } : {}
     const turns: Turn[] = [
       ...input.history.map((h): Turn => (h.role === 'user' ? { role: 'user', text: h.text } : { role: 'assistant', text: h.text, toolCalls: [] })),
-      { role: 'user', text: question, ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments } : {}) },
+      { role: 'user', text: question, ...attachments },
     ]
-    const usage: Usage = { inputTokens: 0, outputTokens: 0 }
-    const toolsUsed: ToolUse[] = []
-    let text = ''
+    const fixedTokens = estimateTokens(JSON.stringify(specs)) + estimateTokens(system) + estimateTokens(context)
+    return { system, context, specs, turns, fixedTokens, usage: { inputTokens: 0, outputTokens: 0 }, toolsUsed: [] }
+  }
 
-    const specsTokens = estimateTokens(JSON.stringify(specs))
-    const systemTokens = estimateTokens(system) + estimateTokens(context)
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      // Hold this call's worst case in the budget until it reports its usage.
-      const worstCase = { inputTokens: systemTokens + specsTokens + turnsTokens(turns), outputTokens: s.maxOutputTokens }
-      const reservation = this.d.budget.reserve(worstCase)
-      if (!reservation) {
-        if (round === 0) return budgetRefusal(this.now())
-        break
-      }
-      let res
-      try {
-        res = await this.d.provider.chat({
-          system,
-          context,
-          turns,
-          tools: specs,
-          maxOutputTokens: s.maxOutputTokens,
-          signal: AbortSignal.timeout(s.providerTimeoutMs),
-        })
-      } catch (err) {
-        // A failed or timed-out call reports no usage, but the provider may
-        // have worked on it (and bill it): count the worst case.
-        reservation.settle(worstCase)
-        const message = err instanceof ProviderError ? err.message : 'the AI provider call failed'
-        const pe = err instanceof ProviderError ? err : undefined
-        this.d.log.warn('provider_error', { provider: this.d.provider.name, status: pe?.status, message, detail: pe?.detail })
-        return { kind: 'refused', reason: 'provider', retryMs: 0, text: `Sorry, I could not answer: ${message}. Try again in a moment.` }
-      }
-      addUsage(usage, res.usage)
-      reservation.settle(res.usage)
-      text = res.text
-
-      if (res.stop === 'refusal') {
-        text = 'I can not help with that one.'
-        break
-      }
-      if (res.stop !== 'tool_use' || res.toolCalls.length === 0) {
-        if (res.stop === 'max_tokens') text = `${text.trimEnd()}…`
-        break
-      }
-
-      turns.push({ role: 'assistant', text: res.text, toolCalls: res.toolCalls, raw: res.raw })
-      const results = await Promise.all(res.toolCalls.map((c) => this.callTool(c, toolsUsed)))
-      turns.push({ role: 'tool', results })
+  /**
+   * One model call, with its worst case held in the budget until it reports
+   * its usage, and the tool calls it asks for. A budget refusal after the
+   * first round ends the answer with the text so far.
+   */
+  private async round(conv: Conversation): Promise<Refusal | { kind: 'done' | 'tools'; text: string }> {
+    const s = this.d.settings
+    const worstCase = { inputTokens: conv.fixedTokens + turnsTokens(conv.turns), outputTokens: s.maxOutputTokens }
+    const reservation = this.d.budget.reserve(worstCase)
+    if (!reservation) return budgetRefusal(this.now())
+    let res
+    try {
+      res = await this.d.provider.chat({
+        system: conv.system,
+        context: conv.context,
+        turns: conv.turns,
+        tools: conv.specs,
+        maxOutputTokens: s.maxOutputTokens,
+        signal: AbortSignal.timeout(s.providerTimeoutMs),
+      })
+    } catch (err) {
+      // A failed or timed-out call reports no usage, but the provider may
+      // have worked on it (and bill it): count the worst case.
+      reservation.settle(worstCase)
+      return this.providerRefusal(err)
     }
+    addUsage(conv.usage, res.usage)
+    reservation.settle(res.usage)
 
-    text = text.trim()
+    if (res.stop === 'refusal') return { kind: 'done', text: 'I can not help with that one.' }
+    if (res.stop !== 'tool_use' || res.toolCalls.length === 0) {
+      return { kind: 'done', text: res.stop === 'max_tokens' ? `${res.text.trimEnd()}…` : res.text }
+    }
+    conv.turns.push({ role: 'assistant', text: res.text, toolCalls: res.toolCalls, raw: res.raw })
+    const results = await Promise.all(res.toolCalls.map((c) => this.callTool(c, conv.toolsUsed)))
+    conv.turns.push({ role: 'tool', results })
+    return { kind: 'tools', text: res.text }
+  }
+
+  private providerRefusal(err: unknown): Refusal {
+    const message = err instanceof ProviderError ? err.message : 'the AI provider call failed'
+    const pe = err instanceof ProviderError ? err : undefined
+    this.d.log.warn('provider_error', { provider: this.d.provider.name, status: pe?.status, message, detail: pe?.detail })
+    return { kind: 'refused', reason: 'provider', retryMs: 0, text: `Sorry, I could not answer: ${message}. Try again in a moment.` }
+  }
+
+  private answered(conv: Conversation, raw: string): AskResult {
+    let text = raw.trim()
     if (!text) {
       if (!this.d.budget.hasRoom()) return budgetRefusal(this.now())
       text = 'Sorry, I could not come up with an answer. Try asking in another way.'
     }
+    const { usage, toolsUsed } = conv
     this.d.log.info('answered', {
       provider: this.d.provider.name,
       model: this.d.provider.model,
