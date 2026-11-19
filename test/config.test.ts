@@ -70,7 +70,9 @@ describe('config', () => {
     assert.ok(p.some((x) => x.includes('"apiKey" looks like a secret')))
     assert.ok(p.some((x) => x.includes('unknown setting "colour"')))
   })
+})
 
+describe('config: combinations and attachments', () => {
   it('needs prices for a cost budget on an unknown model', () => {
     const p = problems({ ...minimal, MNEMO_MODEL: 'some-new-model', MNEMO_DAILY_COST_BUDGET_USD: '1' })
     assert.ok(p.some((x) => x.startsWith('MNEMO_DAILY_COST_BUDGET_USD needs prices')))

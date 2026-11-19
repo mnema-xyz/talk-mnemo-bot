@@ -101,7 +101,9 @@ describe('Engine', () => {
     await engine(p, { maxToolCalls: 0 }).ask({ ...ask, question: 'q' })
     assert.deepEqual(p.requests[0]?.tools, [])
   })
+})
 
+describe('Engine: logs, rounds and rate limits', () => {
   it('keeps question text out of the logs, also at debug level', async () => {
     const lines: unknown[] = []
     const capture = (msg: string, f?: Record<string, unknown>) => lines.push({ msg, ...f })
@@ -151,7 +153,9 @@ describe('Engine', () => {
     assert.equal((await e.ask({ ...ask, question: 'q', admitted: true })).kind, 'answer')
     assert.equal(p.requests.length, 1)
   })
+})
 
+describe('Engine: the daily budget', () => {
   it('refuses with a clear message when the daily budget is used up', async () => {
     const budget = new Budget({ dailyTokens: 100_000, dailyCostUsd: 0, inputUsdPerMTok: 0, outputUsdPerMTok: 0 })
     const e = engine(fakeProvider(), {}, budget)
@@ -201,7 +205,9 @@ describe('Engine', () => {
     assert.equal(spent.outputTokens, 1000)
     assert.ok(spent.inputTokens > 0)
   })
+})
 
+describe('Engine: prompts and provider calls', () => {
   it('sends the same system prompt at any time and the time and name as context', async () => {
     const run = async (now: string, askerName: string) => {
       const p = fakeProvider()
@@ -231,7 +237,9 @@ describe('Engine', () => {
     const r = await engine(p).ask({ ...ask, question: 'weather in Marbella?' })
     assert.deepEqual(r.kind === 'answer' && r.usage, { inputTokens: 1900, outputTokens: 30, cacheReadTokens: 800, cacheWriteTokens: 800 })
   })
+})
 
+describe('Engine: provider failures', () => {
   it('turns provider failures and refusals into plain answers', async () => {
     const failing: Provider = {
       name: 'x',

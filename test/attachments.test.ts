@@ -155,6 +155,11 @@ function fakeBtn(customId: string, userId = 'u1', channelId = 'c1') {
   return { i: i as unknown as Interaction, sent }
 }
 
+const textOf = (s: Sent | undefined) => s?.content ?? ''
+const promptButtons = (s: Sent | undefined) => s?.components?.[0]?.components ?? []
+const isPrompt = (s: Sent) => promptButtons(s).length === 2
+const yesOf = (s: Sent | undefined) => promptButtons(s)[0]?.custom_id ?? ''
+
 describe('attachment classification', () => {
   it('identifies images, pdf, text, and unsupported categories', () => {
     assert.equal(classifyAttachment({ id: '1', filename: 'photo.PNG', mime_type: 'image/png', original_filename: '', size_bytes: 10, is_deleted: false, url: '' }).type, 'image')
@@ -257,19 +262,19 @@ describe('consent flow', () => {
     assert.equal(t.posted.length, 1)
     assert.equal(t.downloadCalls.length, 0, 'no download before consent')
     const consentMsg = t.posted[0]
-    assert.match(consentMsg?.content ?? '', /The image will be shared with Anthropic\. Should I check it anyway\?/)
-    const buttons = consentMsg?.components?.[0]?.components ?? []
+    assert.match(textOf(consentMsg), /The image will be shared with Anthropic\. Should I check it anyway\?/)
+    const buttons = promptButtons(consentMsg)
     assert.equal(buttons.length, 2)
     assert.equal(buttons[0]?.label, 'Yes, check it')
     assert.equal(buttons[1]?.label, 'No')
 
-    const yesId = buttons[0]?.custom_id ?? buttons[0]?.customId ?? ''
+    const yesId = yesOf(consentMsg)
 
     // 2. Another member tries to click Yes
     const otherUserClick = fakeBtn(yesId, 'u2')
     await t.run(otherUserClick.i)
     assert.equal(otherUserClick.sent[0]?.ephemeral, true)
-    assert.match(otherUserClick.sent[0]?.content ?? '', /Only Alice can answer this\./)
+    assert.match(textOf(otherUserClick.sent[0]), /Only Alice can answer this\./)
     assert.equal(t.downloadCalls.length, 0, 'other user click did not trigger download')
 
     // 3. Original asker clicks Yes
@@ -277,9 +282,11 @@ describe('consent flow', () => {
     await t.run(askerClick.i)
     assert.equal(t.downloadCalls.length, 1, 'download was called after Yes')
     assert.equal(t.posted.length, 2, 'answer was posted')
-    assert.match(t.posted[1]?.content ?? '', /You asked/)
+    assert.match(textOf(t.posted[1]), /You asked/)
   })
+})
 
+describe('consent flow: No, wording and no consent', () => {
   it('No by asker sends brief acknowledgement and sends nothing', async () => {
     const t = setupBot()
     await t.emitMessage({
@@ -349,8 +356,6 @@ function fileMention(n: number, user = 'u1', channel = 'c1') {
   }
 }
 
-const isPrompt = (s: Sent) => (s.components?.[0]?.components.length ?? 0) === 2
-const yesOf = (s: Sent | undefined) => s?.components?.[0]?.components[0]?.custom_id ?? ''
 
 describe('attachment questions and the limits', () => {
   it('a flood of attachment mentions gets prompts only up to the member limit, and one refusal', async () => {
@@ -449,7 +454,9 @@ describe('attachment types and downscaling', () => {
     const text = extractPdfText(pdf)
     assert.match(text, /Invoice 98765/)
   })
+})
 
+describe('attachment types: refusals before the download', () => {
   it('unsupported type refuses without downloading', async () => {
     const t = setupBot()
     await t.emitMessage({
@@ -621,7 +628,9 @@ describe('provider request shapes', () => {
     assert.equal(content[1]?.source?.media_type, 'application/pdf')
     assert.equal(content[2]?.type, 'text')
   })
+})
 
+describe('provider request shapes: OpenAI', () => {
   it('OpenAI provider formats image_url in messages properly', async () => {
     let capturedBody: unknown
     const mockFetch = (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
