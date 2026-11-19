@@ -191,6 +191,9 @@ export class MnemoBot {
         await this.post(m.channel_id, 'The configured model does not support image input.', undefined, where)
         return
       }
+      // A consent prompt counts against the limits like a question, so a flood
+      // of attachment mentions neither posts one prompt each nor skips them.
+      if (await this.refusedInChannel(m, where)) return
       const askConsent = this.s.attachments?.askConsent ?? true
       if (askConsent) {
         await this.askConsent(m, threadId, where, attachment, classification)
@@ -200,14 +203,17 @@ export class MnemoBot {
       return
     }
 
-    // Limits are checked before queueing, so a flood neither queues up nor
-    // gets one public refusal per message: the member hears it once.
-    const refused = this.engine.admit(m.user_id, m.channel_id)
-    if (refused) {
-      if (this.told.first(`${m.user_id}:${refused.reason}`, refused.retryMs)) await this.post(m.channel_id, refused.text, undefined, where)
-      return
-    }
+    if (await this.refusedInChannel(m, where)) return
     await this.serial(threadId ?? m.id, () => this.answerMessage(m, threadId))
+  }
+
+  /** Limits are checked before queueing, so a flood neither queues up nor
+   * gets one public refusal per message: the member hears it once. */
+  private async refusedInChannel(m: Message, where: { parent_id: string } | { message_reference: { message_id: string } }): Promise<boolean> {
+    const refused = this.engine.admit(m.user_id, m.channel_id)
+    if (!refused) return false
+    if (this.told.first(`${m.user_id}:${refused.reason}`, refused.retryMs)) await this.post(m.channel_id, refused.text, undefined, where)
+    return true
   }
 
   private async findAttachment(m: Message): Promise<Attachment | undefined> {
@@ -275,20 +281,33 @@ export class MnemoBot {
       await i.reply({ content: `Only ${consent.askerName} can answer this.`, ephemeral: true, allowed_mentions: NO_PINGS })
       return
     }
-    if (consent.timer) clearTimeout(consent.timer)
-    this.consents.delete(consentId)
-
     if (kind === 'consent_no') {
+      this.dropConsent(consentId, consent)
       await i.deferUpdate()
       await i.editReply({ content: "Okay, I won't look at it.", components: [] }).catch(() => undefined)
       return
     }
+    // The accepted call is a question of its own: it is admitted before the
+    // download. A refused Yes keeps the prompt, so the asker can try again.
+    // Admitted and claimed with no await in between, so a double click reads
+    // the file once.
+    const refused = this.engine.admit(i.user.id, consent.channelId)
+    if (refused) {
+      await i.reply({ content: refused.text, ephemeral: true, allowed_mentions: NO_PINGS })
+      return
+    }
+    this.dropConsent(consentId, consent)
 
     await i.deferUpdate()
     await i.editReply({ components: [] }).catch(() => undefined)
     await this.serial(consent.threadId ?? consent.message.id, () =>
       this.answerWithAttachment(consent.message, consent.threadId, consent.attachment, consent.classification),
     )
+  }
+
+  private dropConsent(consentId: string, consent: ConsentRecord): void {
+    if (consent.timer) clearTimeout(consent.timer)
+    this.consents.delete(consentId)
   }
 
   private async answerWithAttachment(
