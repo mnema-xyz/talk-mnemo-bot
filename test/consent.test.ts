@@ -45,6 +45,32 @@ describe('consent prompt: whose file and which', () => {
   })
 })
 
+describe('consent prompt: names as text', () => {
+  const subject = (ownerName: string) =>
+    consentSubject({ attachment: { ...file('a', 'r.txt'), url: '', original_filename: 'r.txt', is_deleted: false }, ownerId: 'u2', ownerName, total: 1 }, 'u1')
+
+  it('escapes Markdown in the name of whoever posted the file', () => {
+    const text = subject('[x](https://e.example) **b**')
+    assert.ok(text.includes('\\[x\\]\\(https\\:\\/\\/e\\.example\\) \\*\\*b\\*\\*'), text)
+    assert.doesNotMatch(text, /(?<!\\)\[x(?<!\\)\]/)
+  })
+
+  it('keeps the name to one short line', () => {
+    const text = subject(`${'B'.repeat(200)}\n<@everyone>`)
+    assert.doesNotMatch(text, /\n/)
+    assert.doesNotMatch(text, /(?<!\\)</)
+    assert.ok(text.length < 200, `length ${text.length}`)
+  })
+
+  it('escapes the asker\'s name in the refusal to someone else', async () => {
+    const t = setupBot()
+    await t.emitMessage({ ...fileMention(1), display_name: '**Al** `ice`' })
+    const other = fakeBtn(yesOf(t.posted[0]), 'u9')
+    await t.run(other.i)
+    assert.equal(textOf(other.sent[0]), 'Only \\*\\*Al\\*\\* \\`ice\\` can answer this.')
+  })
+})
+
 describe('consent prompt: expiry', () => {
   it('tells the asker when the question expired, and a late Yes reads nothing', async (ctx) => {
     mock.timers.enable({ apis: ['setTimeout'] })

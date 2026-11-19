@@ -24,10 +24,18 @@ function shownName(a: Attachment): string {
   return name.length > 80 ? `${name.slice(0, 79)}…` : name
 }
 
+/** A member's name as it goes into a message: one short line, every ASCII
+ * punctuation mark escaped, so the name shows as typed and formats nothing. */
+export function shownMemberName(name: string): string {
+  const line = name.replace(/\p{C}+/gu, ' ').trim()
+  const short = line.length > 64 ? `${line.slice(0, 63)}…` : line
+  return short.replace(/[!-/:-@[-`{-~]/g, '\\$&')
+}
+
 /** Which file the prompt is about and whose it is, before the question. */
 export function consentSubject(found: FoundAttachment, askerId: string): string {
   const name = `\`${shownName(found.attachment)}\``
-  const whose = found.ownerId === askerId ? `your file ${name}` : `${name}, a file ${found.ownerName} posted`
+  const whose = found.ownerId === askerId ? `your file ${name}` : `${name}, a file ${shownMemberName(found.ownerName)} posted`
   const more = found.total > 1 ? ` I read only this one of the ${found.total} attachments on that message.` : ''
   return `You asked about ${whose}.${more}`
 }
@@ -37,6 +45,7 @@ export const EXPIRED_TEXT = 'This question has expired, so I did not look at the
 
 export interface ConsentRecord {
   askerId: string
+  /** As shownMemberName gives it. */
   askerName: string
   channelId: string
   threadId?: string | undefined
@@ -97,7 +106,7 @@ export class Consents {
     timer.unref()
     this.open.set(consentId, {
       askerId: m.user_id,
-      askerName: m.display_name || m.username,
+      askerName: shownMemberName(m.display_name || m.username),
       channelId: m.channel_id,
       threadId,
       message: m,
