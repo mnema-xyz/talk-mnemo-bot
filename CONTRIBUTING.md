@@ -30,8 +30,10 @@ build step. That is why the code uses only syntax that can be erased: no
   README's *Dependencies* table. Prefer Node's standard library.
 - **Never commit a secret**: no API keys, tokens, private addresses or
   personal data, also not in fixtures or examples. Use `example.org` and
-  placeholders. CI runs on every push; run `gitleaks dir .` locally if you
-  have it.
+  placeholders. CI's secret scan runs [gitleaks](https://github.com/gitleaks/gitleaks)
+  over the tree and the new commits of every pull request and push; run
+  `gitleaks dir .` locally if you have it. There is no allowlist: change a
+  fixture until it no longer looks like a key.
 - **Privacy**: anything new that is sent to the AI provider or a tool's
   service must be listed in the README's *Privacy* section.
 - **Commits** follow [Conventional Commits](https://www.conventionalcommits.org)
@@ -46,7 +48,7 @@ Changes to `src/bot/` should pass the integration test against a real
 Mnema Talk (Docker needed):
 
 ```sh
-MNEMA_SRC=../mnema-talk scripts/integration.sh
+MNEMA_SRC=../talk scripts/integration.sh
 ```
 
 ## Pull requests

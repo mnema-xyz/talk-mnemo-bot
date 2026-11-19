@@ -9,7 +9,7 @@ reproduce it, and the version or commit. You will get an answer within a
 few days.
 
 A vulnerability in Mnema Talk itself or in its SDK belongs to
-[Mnema Talk's security policy](https://github.com/msch128/mnema-talk/security/policy).
+[Mnema Talk's security policy](https://github.com/mnema-xyz/talk/security/policy).
 
 ## Supported versions
 

@@ -4,13 +4,13 @@
 # mentions, threads, /ask and the buttons with the fake AI provider. No AI
 # provider and no network beyond Docker images is involved.
 #
-#   MNEMA_SRC=../mnema-talk scripts/integration.sh
+#   MNEMA_SRC=../talk scripts/integration.sh
 #
 # KEEP=1 leaves the stack running for a look (docker compose -p <project> down -v).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-: "${MNEMA_SRC:?set MNEMA_SRC to a mnema-talk checkout (the bot platform must be in it)}"
+: "${MNEMA_SRC:?set MNEMA_SRC to a checkout of mnema-xyz/talk (the bot platform must be in it)}"
 MNEMA_SRC="$(cd "$MNEMA_SRC" && pwd)"
 export MNEMA_SRC
 

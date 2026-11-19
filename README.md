@@ -2,7 +2,7 @@
 
 <img src="assets/mnemo.png" alt="" width="96" align="right">
 
-**Mnemo is an AI helper bot for [Mnema Talk](https://github.com/msch128/mnema-talk).**
+**Mnemo is an AI helper bot for [Mnema Talk](https://github.com/mnema-xyz/talk).**
 It is self-hosted: you run Mnemo yourself and connect it to the AI provider of
 your choice with your own API key. Mnema Talk has no AI features of its own;
 Mnemo is a separate program that uses the bot API, and it is also a blueprint
@@ -58,7 +58,7 @@ send messages and add reactions, and to receive messages through the
 
 ```sh
 git clone https://github.com/mnema-xyz/talk-mnemo-bot.git
-cd mnema-talk-mnemo-bot
+cd talk-mnemo-bot
 npm ci
 npm run add-link -- https://talk.example.org
 ```
@@ -746,7 +746,7 @@ mentions, threads, `/ask`, Regenerate, the health endpoint and shutdown, with
 the fake provider:
 
 ```sh
-MNEMA_SRC=../mnema-talk scripts/integration.sh
+MNEMA_SRC=../talk scripts/integration.sh
 ```
 
 The avatar is [`assets/mnemo.svg`](assets/mnemo.svg), in Mnema Talk's colours.
