@@ -7,6 +7,34 @@ import { consentButtons, consentPromptText, type AttachmentClassification } from
 import { NO_PINGS, type Where } from './chat.ts'
 import type { BotSettings } from './settings.ts'
 
+/** The file a question is about, and whose message it came with. */
+export interface FoundAttachment {
+  attachment: Attachment
+  /** Who posted the message the file is on: the asker, or the author of the
+   * message the question replies to. */
+  ownerId: string
+  ownerName: string
+  /** Attachments on that message; Mnemo reads only the first. */
+  total: number
+}
+
+/** A file name as it goes into the prompt: one line, short, no code marks. */
+function shownName(a: Attachment): string {
+  const name = (a.original_filename || a.filename || 'the file').replace(/[\p{C}`]+/gu, ' ').trim()
+  return name.length > 80 ? `${name.slice(0, 79)}…` : name
+}
+
+/** Which file the prompt is about and whose it is, before the question. */
+export function consentSubject(found: FoundAttachment, askerId: string): string {
+  const name = `\`${shownName(found.attachment)}\``
+  const whose = found.ownerId === askerId ? `your file ${name}` : `${name}, a file ${found.ownerName} posted`
+  const more = found.total > 1 ? ` I read only this one of the ${found.total} attachments on that message.` : ''
+  return `You asked about ${whose}.${more}`
+}
+
+/** What the prompt says once it can no longer be answered. */
+export const EXPIRED_TEXT = 'This question has expired, so I did not look at the file. Ask me again if you still want me to check it.'
+
 export interface ConsentRecord {
   askerId: string
   askerName: string
@@ -49,11 +77,13 @@ export class Consents {
     this.open.delete(consentId)
   }
 
-  /** Posts the prompt with Yes and No; after CONSENT_MS its buttons go. */
-  async ask(m: Message, threadId: string | undefined, where: Where, attachment: Attachment, classification: AttachmentClassification): Promise<void> {
+  /** Posts the prompt with Yes and No; after CONSENT_MS its buttons go and
+   * it says that it expired. */
+  async ask(m: Message, threadId: string | undefined, where: Where, found: FoundAttachment, classification: AttachmentClassification): Promise<void> {
     const consentId = randomBytes(9).toString('base64url')
+    const { attachment } = found
     const sentMsg = await this.client.rest.createMessage(m.channel_id, {
-      content: consentPromptText(classification, this.shownProvider(), this.isLocal()),
+      content: `${consentSubject(found, m.user_id)} ${consentPromptText(classification, this.shownProvider(), this.isLocal())}`,
       ...where,
       components: consentButtons(consentId),
       allowed_mentions: NO_PINGS,
@@ -61,7 +91,7 @@ export class Consents {
     const timer = setTimeout(() => {
       this.open.delete(consentId)
       if (sentMsg.id) {
-        void this.client.rest.editMessage(m.channel_id, sentMsg.id, { components: [] }).catch(() => undefined)
+        void this.client.rest.editMessage(m.channel_id, sentMsg.id, { content: EXPIRED_TEXT, components: [] }).catch(() => undefined)
       }
     }, CONSENT_MS)
     timer.unref()
