@@ -149,7 +149,7 @@ type `/ask`. Nothing happens? See [Troubleshooting](#troubleshooting).
 | Write in a thread that Mnemo started (no mention needed) | Answers in the thread and remembers the conversation so far (bounded, see `MNEMO_THREAD_*`) |
 | Mention it inside somebody else's thread | Answers that one message there, with no earlier context, and does not follow that thread |
 | `/ask question:… [private:true]` | Answers in the channel, or only to you with `private` |
-| **Regenerate** | Writes a new answer to the same question. Only the person who asked, or an admin (server administrator or `MNEMO_ADMIN_USER_IDS`), can use it, at most `MNEMO_MAX_REGENERATIONS` times per answer (default 2; `0` removes the button). Every regeneration counts against the daily budget and the rate limits. The old answer stays but loses its buttons, and the button disappears from the last answer once the limit is reached |
+| **Regenerate** | Writes a new answer to the same question. Only the person who asked, or an admin (server administrator or `MNEMO_ADMIN_USER_IDS`), can use it, at most `MNEMO_MAX_REGENERATIONS` times per answer (default 2; `0` removes the button). Every regeneration counts against the daily budget and the rate limits. The old answer stays but loses its buttons, and the button disappears from the last answer once the limit is reached. An answer about an attachment has no Regenerate: Mnemo does not keep the file, so ask again with it |
 | `/details` (admins only) | Shows you privately which tools were used with which input, which model answered, the tokens used and what was sent to the provider, for the last public answer in the channel. Answers to `/ask private:true` are never shown |
 | **Follow up** (under `/ask` answers) | Opens a small form for a follow-up question, which is answered with the earlier question and answer as context |
 | Mention or reply with an attachment | Prompts for consent first, then answers questions about the image or file |
@@ -198,7 +198,11 @@ the message it replies to:
     characters, and the cut is marked.
   - Unsupported files (archives, audio, video) are refused before downloading.
 - **Privacy**: Attachment data is never written to disk or kept in thread memory.
-  Only Mnemo's text answer is retained.
+  The file goes to the provider only with the question it was accepted for;
+  the thread memory and the answer's record keep the bare question and Mnemo's
+  text answer. Later questions in the thread do not send the file again (asking
+  about it again needs a new consent), and an answer about a file has no
+  Regenerate.
 
 Mnemo ignores other bots and its own messages, never reads a channel's
 history, and only answers in the channels it was given (narrow them further
@@ -411,8 +415,9 @@ contacts outside services.
 - the system prompt, the current date and time (UTC), the tool descriptions
   and the tools' results;
 - when asking about an attachment (with consent granted): the processed image,
-  document, or extracted text for that question. Attachment bytes are never
-  stored on disk or kept in thread history.
+  document, or extracted text for that question only. Attachment bytes are
+  never stored on disk or kept in thread history: later questions in the
+  thread carry only the earlier question text and answers.
 
 When an admin regenerates an answer in a thread, the model sees the admin's
 display name instead of the asker's (only with `MNEMO_SEND_DISPLAY_NAME` on).
@@ -596,7 +601,7 @@ something goes wrong.
 | A local model answers but never uses tools | The model does not support tool calling. Choose one that does |
 | "I have used up today's budget" | The daily budget is reached; raise `MNEMO_DAILY_TOKEN_BUDGET` or wait for midnight UTC |
 | `/details` says only admins can use it | The member is not a server administrator and their user ID is not in `MNEMO_ADMIN_USER_IDS` |
-| Regenerate is missing under an answer | `MNEMO_MAX_REGENERATIONS` is `0`, or the answer was already regenerated that often |
+| Regenerate is missing under an answer | `MNEMO_MAX_REGENERATIONS` is `0`, the answer was already regenerated that often, or it is an answer about an attachment (Mnemo does not keep the file; ask again with it) |
 | Regenerate says the answer is too old | Mnemo was restarted, or the answer is more than 24 hours old. Ask again |
 | No 👀 reaction | Mnemo lacks *Add reactions* in that channel; it still answers |
 

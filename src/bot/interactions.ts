@@ -35,6 +35,7 @@ interface InteractionQuestion {
 }
 
 const TOO_OLD = 'This answer is too old for that now. Ask me again.'
+const NO_FILE_KEPT = 'I do not keep attached files, so I cannot regenerate an answer about one. Ask me again with the file.'
 
 export class Interactions {
   private readonly c: BotCore
@@ -113,7 +114,8 @@ export class Interactions {
     if (i.user.id !== rec.askerId && !this.isAdmin(i)) {
       return this.privately(i, 'Only the person who asked, or a Mnemo admin, can regenerate this answer.')
     }
-    // The button is hidden at the limit, but a custom id can be forged.
+    // The button is hidden for these, but a custom id can be forged.
+    if (rec.withFile) return this.privately(i, NO_FILE_KEPT)
     if (rec.regenerations >= this.c.s.maxRegenerations) {
       return this.privately(i, 'This answer was regenerated as often as allowed. Ask a new question or a follow-up.')
     }

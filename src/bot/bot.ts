@@ -29,6 +29,12 @@ function foundOn(m: Message): FoundAttachment | undefined {
   return attachment ? { attachment, ownerId: m.user_id, ownerName: m.display_name || m.username || 'someone', total: all.length } : undefined
 }
 
+/** What the provider gets for a question about a file, once. */
+interface WithFile {
+  question: string
+  attachments?: MediaAttachment[] | undefined
+}
+
 export class MnemoBot {
   private selfId = ''
   private selfName = ''
@@ -200,22 +206,25 @@ export class MnemoBot {
     if (typeof read === 'string') return post(this.client, m.channel_id, read, undefined, where)
     if (!read) return
 
-    let question = this.stripMention(m.content)
-    if (read.textPrefix) question = question ? `${read.textPrefix}\n\n${question}` : read.textPrefix
-    if (!question) question = classification.type === 'image' ? 'Describe this image.' : 'Describe this file.'
-    await this.sendAnswer(m, threadId, question, read.attachments)
+    const question = this.stripMention(m.content) || (classification.type === 'image' ? 'Describe this image.' : 'Describe this file.')
+    const withFile = read.textPrefix ? `${read.textPrefix}\n\n${question}` : question
+    await this.sendAnswer(m, threadId, question, { question: withFile, attachments: read.attachments })
   }
 
-  private async sendAnswer(m: Message, threadId: string | undefined, question: string, attachments?: MediaAttachment[]): Promise<void> {
+  /** Answers a question. With a file, the provider gets the question with the
+   * file once; the thread and the answer's record keep only the question. */
+  private async sendAnswer(m: Message, threadId: string | undefined, question: string, file?: WithFile): Promise<void> {
     const known = threadId ? this.threads.get(threadId) : undefined
     const history = known ?? []
     const follow = threadId !== undefined && (threadId === m.id || known !== undefined)
     await react(this.client, m, true)
     try {
       const askerName = m.display_name || m.username
-      const result = await this.engine.ask({ question, history, userId: m.user_id, channelId: m.channel_id, askerName, attachments, admitted: true })
-      const answerId = this.answers.remember(result, { question, history, askerId: m.user_id, channelId: m.channel_id, threadId, ephemeral: false, regenerations: 0 })
-      const components = answerId ? this.answers.buttons(answerId, false, 0) : undefined
+      const asked = file?.question ?? question
+      const result = await this.engine.ask({ question: asked, history, userId: m.user_id, channelId: m.channel_id, askerName, attachments: file?.attachments, admitted: true })
+      const record = { question, history, askerId: m.user_id, channelId: m.channel_id, threadId, ephemeral: false, regenerations: 0, withFile: file !== undefined }
+      const answerId = this.answers.remember(result, record)
+      const components = answerId ? this.answers.buttons(answerId, false, 0, !file) : undefined
       await post(this.client, m.channel_id, result.text, components, whereFor(m, threadId))
       if (follow && result.kind === 'answer') {
         this.threads.set(threadId, boundHistory([...history, { role: 'user', text: question }, { role: 'assistant', text: result.text }], this.s.thread))

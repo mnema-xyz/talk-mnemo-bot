@@ -21,6 +21,9 @@ export interface AnswerRecord {
   ephemeral: boolean
   /** How many times this question was regenerated to get this answer. */
   regenerations: number
+  /** The question came with a file, which is not kept: the answer cannot be
+   * regenerated. */
+  withFile?: boolean | undefined
   details: AnswerDetails
 }
 
@@ -64,12 +67,12 @@ export class AnswerStore {
     return id && rec ? { id, rec } : undefined
   }
 
-  /** Regenerate (until its limit), and Follow up under interaction answers;
+  /** Regenerate (until its limit, never for an answer about a file), and Follow up under interaction answers;
    * no buttons at all when neither applies. Details are not a button: they
    * are for admins, through /details. */
-  buttons(answerId: string, followUp: boolean, regenerations: number): Buttons | undefined {
+  buttons(answerId: string, followUp: boolean, regenerations: number, regenerate = true): Buttons | undefined {
     const row: ButtonComponent[] = []
-    if (regenerations < this.s.maxRegenerations) {
+    if (regenerate && regenerations < this.s.maxRegenerations) {
       row.push(button({ customId: customId('regen', answerId), label: 'Regenerate', style: ButtonStyle.Secondary }))
     }
     if (followUp) row.push(button({ customId: customId('follow', answerId), label: 'Follow up', style: ButtonStyle.Primary }))
