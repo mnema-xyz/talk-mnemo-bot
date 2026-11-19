@@ -47,6 +47,8 @@ export interface AnswerDetails {
   historyTurns: number
   context: 'none' | 'thread' | 'follow-up'
   sentDisplayName: boolean
+  /** An attached file went with the question. */
+  sentFile?: boolean | undefined
 }
 
 export function detailsFrom(
@@ -55,6 +57,7 @@ export function detailsFrom(
   context: AnswerDetails['context'],
   sentDisplayName: boolean,
   costUsd: number,
+  sentFile = false,
 ): AnswerDetails {
   return {
     context,
@@ -66,6 +69,7 @@ export function detailsFrom(
     costUsd,
     historyTurns,
     sentDisplayName,
+    sentFile,
   }
 }
 
@@ -81,6 +85,7 @@ export function detailsText(d: AnswerDetails): string {
     }
   }
   const sent = ['the question']
+  if (d.sentFile) sent.push('the attached file')
   if (d.historyTurns > 0) {
     sent.push(d.context === 'thread' ? `the last ${d.historyTurns} messages of the thread` : 'the earlier question and answer')
   }

@@ -33,6 +33,11 @@ describe('details text', () => {
     assert.match(t, /Tokens: 1200 in, 80 out\./)
   })
 
+  it('says when an attached file was sent with the question', () => {
+    assert.match(detailsText({ ...base, sentFile: true }), /Sent to the AI provider: the question, the attached file\./)
+    assert.doesNotMatch(detailsText(base), /attached file/)
+  })
+
   it('lists tools with their input, the thread context and the name', () => {
     const t = detailsText({
       ...base,

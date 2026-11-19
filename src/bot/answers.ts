@@ -84,7 +84,7 @@ export class AnswerStore {
     if (result.kind !== 'answer') return undefined
     const id = randomBytes(9).toString('base64url')
     const context = r.history.length === 0 ? 'none' : r.threadId ? 'thread' : 'follow-up'
-    const details = detailsFrom(result, r.history.length, context, this.s.sendDisplayName, this.budget.costUsd(result.usage))
+    const details = detailsFrom(result, r.history.length, context, this.s.sendDisplayName, this.budget.costUsd(result.usage), r.withFile === true)
     this.answers.set(id, { ...r, answer: result.text, details })
     if (!r.ephemeral) this.lastAnswer.set(r.channelId, id)
     this.log.info('answer_details', {

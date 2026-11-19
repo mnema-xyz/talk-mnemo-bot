@@ -53,6 +53,14 @@ describe('attachments are not kept after the answer', () => {
     assert.equal(click.sent[0]?.ephemeral, true)
   })
 
+  it('/details names the attached file for that answer only', async () => {
+    const t = await answeredFileQuestion()
+    const details = (t.bot as unknown as { answers: { lastIn(c: string): { rec: { details: { sentFile?: boolean } } } | undefined } }).answers
+    assert.equal(details.lastIn('c1')?.rec.details.sentFile, true)
+    await t.emitMessage(thread(2, 'and what else?'))
+    assert.equal(details.lastIn('c1')?.rec.details.sentFile, false)
+  })
+
   it('a Regenerate later in the thread does not send the file again', async () => {
     const t = await answeredFileQuestion()
     await t.emitMessage(thread(2, 'and what else?'))
