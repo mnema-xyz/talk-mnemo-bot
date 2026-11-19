@@ -24,12 +24,17 @@ function shownName(a: Attachment): string {
   return name.length > 80 ? `${name.slice(0, 79)}…` : name
 }
 
-/** A member's name as it goes into a message: one short line, every ASCII
- * punctuation mark escaped, so the name shows as typed and formats nothing. */
+/** A member's name as it goes into a message: one line of at most 64
+ * characters (whole graphemes, so emoji are not split), every ASCII punctuation mark escaped, so the name shows as typed
+ * and formats nothing. Talk resolves the escapes before it finds mentions,
+ * custom emoji and wiki links in the text, so a word joiner (U+2060) follows
+ * each @, < and [ as well. Control and format characters go, except the zero
+ * width joiner that joined emoji need. */
 export function shownMemberName(name: string): string {
-  const line = name.replace(/\p{C}+/gu, ' ').trim()
-  const short = line.length > 64 ? `${line.slice(0, 63)}…` : line
-  return short.replace(/[!-/:-@[-`{-~]/g, '\\$&')
+  const line = name.replace(/(?:(?!\u200D)\p{C})+/gu, ' ').trim()
+  const chars = Array.from(new Intl.Segmenter().segment(line), (g) => g.segment)
+  const short = chars.length > 64 ? `${chars.slice(0, 63).join('')}…` : chars.join('')
+  return short.replace(/[!-/:-@[-`{-~]/g, (ch) => (ch === '@' || ch === '<' || ch === '[' ? `\\${ch}\u2060` : `\\${ch}`))
 }
 
 /** Which file the prompt is about and whose it is, before the question. */
