@@ -191,8 +191,9 @@ the message it replies to:
     models, downscaled automatically to fit provider limits (e.g. Anthropic's 5 MB
     and 8000 px limit). Images of more than 40 megapixels are not read.
   - PDFs have text extracted (or sent as document blocks to Anthropic). The
-    extraction reads plain text from the PDF's content streams and skips a
-    stream that would inflate to more than 4 MB.
+    extraction reads plain text from the PDF's content streams, skips a
+    stream that would inflate to more than 4 MB, and stops once the streams of
+    one file add up to 32 MB (a skipped stream counts with the 4 MB).
   - Text files (`txt`, `md`, `csv`, `json`, `log`, and source code) are read as text.
   - Text from a file (a text file or a PDF's extracted text) is cut to 40,000
     characters, and the cut is marked.

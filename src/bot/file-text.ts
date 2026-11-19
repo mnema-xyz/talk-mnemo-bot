@@ -10,8 +10,11 @@ export const TRUNCATED = '\n\n[... content truncated ...]'
 
 /** One stream inflates to at most this many bytes; a larger one is skipped. */
 const MAX_STREAM_BYTES = 4 * 1024 * 1024
-/** All streams of one PDF inflate to at most this many bytes together. */
+/** All streams of one PDF inflate to at most this many bytes together; a
+ * skipped stream counts with the bytes it was inflated to. */
 const MAX_INFLATED_BYTES = 32 * 1024 * 1024
+/** Strings kept from one `[...]` array. */
+const MAX_ARRAY_ITEMS = 10_000
 
 /** The text, cut to MAX_TEXT_CHARS with the marker when it is longer. */
 export function cutText(text: string): string {
@@ -25,9 +28,11 @@ export function extractPdfText(buf: Buffer): string {
   let budget = MAX_INFLATED_BYTES
   for (const raw of pdfStreams(buf.toString('latin1'))) {
     if (out.full || budget <= 0) break
-    const decoded = inflated(raw, Math.min(MAX_STREAM_BYTES, budget))
+    const max = Math.min(MAX_STREAM_BYTES, budget)
+    const decoded = inflated(raw, max)
+    // A skipped stream was inflated up to max before it was given up.
+    budget -= decoded?.length ?? max
     if (decoded === undefined) continue
-    budget -= decoded.length
     shownStrings(decoded, out)
   }
   return cutText(out.text())
@@ -93,12 +98,13 @@ class TextSink {
 interface Scan {
   i: number
   array: string[] | undefined
+  arrayChars: number
   last: string | undefined
 }
 
 /** Adds the strings shown by `(...) Tj` and `[...] TJ` in a content stream. */
 function shownStrings(s: string, out: TextSink): void {
-  const scan: Scan = { i: 0, array: undefined, last: undefined }
+  const scan: Scan = { i: 0, array: undefined, arrayChars: 0, last: undefined }
   while (scan.i < s.length && !out.full) {
     if (!step(s, scan, out)) return
   }
@@ -110,11 +116,12 @@ function step(s: string, scan: Scan, out: TextSink): boolean {
   if (ch === '(') {
     const str = literal(s, scan.i + 1)
     if (!str) return false
-    if (scan.array) scan.array.push(str.text)
-    else scan.last = str.text
+    if (!scan.array) scan.last = str.text
+    else keep(scan, str.text)
     scan.i = str.end
   } else if (ch === '[') {
     scan.array = []
+    scan.arrayChars = 0
     scan.i++
   } else if (ch === ']') {
     const items = scan.array ?? []
@@ -132,6 +139,14 @@ function step(s: string, scan: Scan, out: TextSink): boolean {
   return true
 }
 
+/** Keeps a string of an open array, up to MAX_ARRAY_ITEMS strings and
+ * MAX_TEXT_CHARS characters. */
+function keep(scan: Scan, text: string): void {
+  if (!scan.array || scan.array.length >= MAX_ARRAY_ITEMS || scan.arrayChars > MAX_TEXT_CHARS) return
+  scan.array.push(text)
+  scan.arrayChars += text.length
+}
+
 function skipSpace(s: string, i: number): number {
   while (i < s.length && /\s/.test(s[i] ?? '')) i++
   return i
@@ -140,24 +155,52 @@ function skipSpace(s: string, i: number): number {
 const ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' }
 
 /** A PDF literal string starting after its `(`: balanced parentheses and
- * backslash escapes; undefined when it is not closed. */
+ * backslash escapes; undefined when it is not closed. The text is built from
+ * slices between escapes and keeps at most MAX_TEXT_CHARS of it. */
 function literal(s: string, from: number): { text: string; end: number } | undefined {
+  const text = new Pieces()
   let depth = 1
-  let text = ''
+  let run = from
   for (let i = from; i < s.length; i++) {
-    const ch = s[i] ?? ''
+    const ch = s[i]
     if (ch === '\\') {
-      const next = s[++i] ?? ''
-      const octal = /^[0-7]{1,3}/.exec(s.slice(i, i + 3))?.[0]
-      if (octal) {
-        text += String.fromCharCode(parseInt(octal, 8))
-        i += octal.length - 1
-      } else text += ESCAPES[next] ?? next
-      continue
+      text.add(s.slice(run, i))
+      i = escaped(s, i + 1, text)
+      run = i + 1
+    } else if (ch === '(') depth++
+    else if (ch === ')' && --depth === 0) {
+      text.add(s.slice(run, i))
+      return { text: text.join(), end: i + 1 }
     }
-    if (ch === '(') depth++
-    else if (ch === ')' && --depth === 0) return { text, end: i + 1 }
-    text += ch
   }
   return undefined
+}
+
+/** Adds the escape starting at i (after the backslash); returns its last index. */
+function escaped(s: string, i: number, text: Pieces): number {
+  const octal = /^[0-7]{1,3}/.exec(s.slice(i, i + 3))?.[0]
+  if (octal) {
+    text.add(String.fromCharCode(parseInt(octal, 8)))
+    return i + octal.length - 1
+  }
+  const next = s[i] ?? ''
+  text.add(ESCAPES[next] ?? next)
+  return i
+}
+
+/** Text in pieces, up to MAX_TEXT_CHARS; later pieces are dropped. */
+class Pieces {
+  private readonly parts: string[] = []
+  private length = 0
+
+  add(piece: string): void {
+    if (!piece || this.length >= MAX_TEXT_CHARS) return
+    const kept = piece.slice(0, MAX_TEXT_CHARS - this.length)
+    this.parts.push(kept)
+    this.length += kept.length
+  }
+
+  join(): string {
+    return this.parts.join('')
+  }
 }

@@ -1,6 +1,7 @@
 // Bounds on what reading one attachment may cost: time, memory and the
 // length of the text that goes to the provider.
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { describe, it } from 'node:test'
 import { crc32, deflateSync } from 'node:zlib'
 import { extractPdfText, processImage } from '../src/bot/attachments.ts'
@@ -40,6 +41,30 @@ describe('PDF text extraction: bounds', () => {
     assert.ok(ms < 500, `took ${Math.round(ms)} ms`)
     assert.match(text, /After the big one/)
     assert.doesNotMatch(text, /Bomb/)
+  })
+
+  it('streams over the size cap count against the total, so many of them stop early', () => {
+    const big = deflateSync(Buffer.alloc(5 * 1024 * 1024, 0x20))
+    const ms = elapsed(() => extractPdfText(pdfWith(...Array.from({ length: 2000 }, () => big))))
+    assert.ok(ms < 200, `took ${Math.round(ms)} ms`)
+  })
+
+  it('long open strings and arrays stay within a small heap', () => {
+    // A child process with a 96 MB heap: building strings or arrays from such
+    // streams one piece per byte runs out of it.
+    const script = `
+      import { deflateSync } from 'node:zlib'
+      const { extractPdfText } = await import(${JSON.stringify(new URL('../src/bot/file-text.ts', import.meta.url).href)})
+      const open = deflateSync(Buffer.alloc(4 * 1024 * 1024 - 64, '('))
+      const unclosed = deflateSync(Buffer.from('(' + 'a\\\\'.repeat(1_000_000)))
+      const items = deflateSync(Buffer.from('[' + '()'.repeat(2_000_000)))
+      const parts = [open, unclosed, items, open, unclosed, items, open, items]
+      const pdf = Buffer.concat(parts.flatMap((p) => [Buffer.from('stream\\n'), p, Buffer.from('\\nendstream\\n')]))
+      extractPdfText(pdf)
+      console.log('ok')
+    `
+    const out = execFileSync(process.execPath, ['--max-old-space-size=96', '--input-type=module', '-e', script], { encoding: 'utf8' })
+    assert.equal(out.trim(), 'ok')
   })
 
   it('cuts the text to the text-file limit, with the same marker', () => {
