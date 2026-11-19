@@ -105,7 +105,7 @@ export function setupBot(
     log: silentLogger,
   })
 
-  new MnemoBot(client, engine, engine['d'].budget, { ...SETTINGS, ...overSettings }, silentLogger)
+  const bot = new MnemoBot(client, engine, engine['d'].budget, { ...SETTINGS, ...overSettings }, silentLogger)
   events.emit('ready', { user: { id: 'bot_id', username: 'mnemo', handle: 'mnemo' }, session_id: 's' })
 
   const run = (i: object) => {
@@ -117,7 +117,7 @@ export function setupBot(
     return new Promise<void>((resolve) => setTimeout(resolve, 50))
   }
 
-  return { events, posted, edits, downloadCalls, provider, run, emitMessage }
+  return { bot, events, posted, edits, downloadCalls, provider, run, emitMessage }
 }
 
 export function fakeBtn(customId: string, userId = 'u1', channelId = 'c1') {

@@ -1,6 +1,5 @@
 // Attachment handling for Mnemo: classification, consent prompt, download,
 // image downscaling with sharp, PDF text extraction and stream capping.
-import { inflateSync } from 'node:zlib'
 import {
   actionRow,
   button,
@@ -10,6 +9,8 @@ import {
 } from '@mnema-xyz/bot-sdk'
 import sharp from 'sharp'
 import { customId } from './delivery.ts'
+
+export { cutText, extractPdfText, MAX_TEXT_CHARS, TRUNCATED } from './file-text.ts'
 
 export type AttachmentType = 'image' | 'pdf' | 'text' | 'unsupported'
 
@@ -109,11 +110,15 @@ export async function readStreamWithCap(
   return Buffer.concat(chunks)
 }
 
+/** Images with more pixels than this are not read (about 40 megapixels). */
+const MAX_INPUT_PIXELS = 40_000_000
+
 export async function processImage(
   buffer: Buffer,
   mimeType: string,
 ): Promise<{ data: string; mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' }> {
-  let s = sharp(buffer, { pages: 1 })
+  // Larger images are refused from their header, before they are decoded.
+  let s = sharp(buffer, { pages: 1, limitInputPixels: MAX_INPUT_PIXELS })
   const meta = await s.metadata()
   const MAX_PX = 8000
   const MAX_BYTES = 4.5 * 1024 * 1024
@@ -150,45 +155,4 @@ export async function processImage(
     data: out.toString('base64'),
     mediaType: targetMime,
   }
-}
-
-export function extractPdfText(buf: Buffer): string {
-  const textChunks: string[] = []
-  const str = buf.toString('latin1')
-  const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g
-  let match: RegExpExecArray | null
-  while ((match = streamRegex.exec(str)) !== null) {
-    const raw = Buffer.from(match[1] ?? '', 'latin1')
-    let decoded: string
-    try {
-      decoded = inflateSync(raw).toString('latin1')
-    } catch {
-      decoded = raw.toString('latin1')
-    }
-    const tjRegex = /\((.*?)(?<!\\)\)\s*Tj/g
-    let m: RegExpExecArray | null
-    while ((m = tjRegex.exec(decoded)) !== null) {
-      const unescaped = unescapePdfStr(m[1] ?? '')
-      if (unescaped) textChunks.push(unescaped)
-    }
-    const tjArrayRegex = /\[(.*?)\]\s*TJ/g
-    while ((m = tjArrayRegex.exec(decoded)) !== null) {
-      const inner = m[1] ?? ''
-      const itemRegex = /\((.*?)(?<!\\)\)/g
-      let im: RegExpExecArray | null
-      while ((im = itemRegex.exec(inner)) !== null) {
-        const unescaped = unescapePdfStr(im[1] ?? '')
-        if (unescaped) textChunks.push(unescaped)
-      }
-    }
-  }
-  return textChunks.join(' ').replace(/\s+/g, ' ').trim()
-}
-
-function unescapePdfStr(s: string): string {
-  return s
-    .replace(/\\([()\\])/g, '$1')
-    .replace(/\\n/g, '\n')
-    .replace(/\\r/g, '\r')
-    .replace(/\\t/g, '\t')
 }

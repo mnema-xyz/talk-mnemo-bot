@@ -284,6 +284,26 @@ describe('attachment questions and the limits', () => {
   })
 })
 
+describe('attachment refusals and the limits', () => {
+  it('a flood of mentions with a file Mnemo cannot read gets one refusal, then the limit notice once', async () => {
+    const t = setupBot({}, {}, [], { member: 1 })
+    const zip = (n: number) => ({ ...fileMention(n), attachments: [{ id: `z${n}`, filename: 'a.zip', mime_type: 'application/zip', size_bytes: 20 }] })
+    for (let n = 1; n <= 5; n++) await t.emitMessage(zip(n))
+    assert.equal(t.posted.filter((s) => /can't read zip/.test(s.content ?? '')).length, 1)
+    assert.equal(t.posted.length, 2)
+    assert.match(t.posted[1]?.content ?? '', /You are asking quickly/)
+    assert.equal(t.downloadCalls.length, 0)
+  })
+
+  it('refusals of too large files and of attachments switched off count against the limits too', async () => {
+    const t = setupBot({ attachments: { enabled: false, maxBytes: 1024, askConsent: true } }, {}, [], { channel: 1 })
+    for (let n = 1; n <= 4; n++) await t.emitMessage(fileMention(n, `u${n}`, 'c1', 5000))
+    assert.equal(t.posted.filter((s) => /I can't read attachments/.test(s.content ?? '')).length, 1)
+    assert.ok(t.posted.length <= 4)
+    assert.match(t.posted[1]?.content ?? '', /This channel is keeping me busy/)
+  })
+})
+
 describe('attachment types and downscaling', () => {
   it('downscales an image exceeding limits (e.g. > 8000px)', async () => {
     // Create an image with 8500px width

@@ -24,10 +24,23 @@ function shownName(a: Attachment): string {
   return name.length > 80 ? `${name.slice(0, 79)}…` : name
 }
 
+/** A member's name as it goes into a message: one line of at most 64
+ * characters (whole graphemes, so emoji are not split), every ASCII punctuation mark escaped, so the name shows as typed
+ * and formats nothing. Talk resolves the escapes before it finds mentions,
+ * custom emoji and wiki links in the text, so a word joiner (U+2060) follows
+ * each @, < and [ as well. Control and format characters go, except the zero
+ * width joiner that joined emoji need. */
+export function shownMemberName(name: string): string {
+  const line = name.replace(/(?:(?!\u200D)\p{C})+/gu, ' ').trim()
+  const chars = Array.from(new Intl.Segmenter().segment(line), (g) => g.segment)
+  const short = chars.length > 64 ? `${chars.slice(0, 63).join('')}…` : chars.join('')
+  return short.replace(/[!-/:-@[-`{-~]/g, (ch) => (ch === '@' || ch === '<' || ch === '[' ? `\\${ch}\u2060` : `\\${ch}`))
+}
+
 /** Which file the prompt is about and whose it is, before the question. */
 export function consentSubject(found: FoundAttachment, askerId: string): string {
   const name = `\`${shownName(found.attachment)}\``
-  const whose = found.ownerId === askerId ? `your file ${name}` : `${name}, a file ${found.ownerName} posted`
+  const whose = found.ownerId === askerId ? `your file ${name}` : `${name}, a file ${shownMemberName(found.ownerName)} posted`
   const more = found.total > 1 ? ` I read only this one of the ${found.total} attachments on that message.` : ''
   return `You asked about ${whose}.${more}`
 }
@@ -37,6 +50,7 @@ export const EXPIRED_TEXT = 'This question has expired, so I did not look at the
 
 export interface ConsentRecord {
   askerId: string
+  /** As shownMemberName gives it. */
   askerName: string
   channelId: string
   threadId?: string | undefined
@@ -97,7 +111,7 @@ export class Consents {
     timer.unref()
     this.open.set(consentId, {
       askerId: m.user_id,
-      askerName: m.display_name || m.username,
+      askerName: shownMemberName(m.display_name || m.username),
       channelId: m.channel_id,
       threadId,
       message: m,

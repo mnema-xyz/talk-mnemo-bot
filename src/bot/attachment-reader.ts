@@ -3,7 +3,7 @@
 import { MaxBytesExceededError, NotFoundError, type Attachment, type Client } from '@mnema-xyz/bot-sdk'
 import type { Logger } from '../log.ts'
 import type { MediaAttachment } from '../providers/types.ts'
-import { extractPdfText, processImage, readStreamWithCap, type AttachmentClassification } from './attachments.ts'
+import { cutText, extractPdfText, processImage, readStreamWithCap, type AttachmentClassification } from './attachments.ts'
 import { maxAttachmentBytes, type BotSettings } from './settings.ts'
 
 /** What a question gets from its attachment: media for the provider, or text
@@ -12,9 +12,6 @@ export interface ReadAttachment {
   attachments?: MediaAttachment[]
   textPrefix?: string
 }
-
-/** Text files are cut to this many characters. */
-const MAX_TEXT_CHARS = 40_000
 
 /** A size for a member: MB with one decimal (none when it is .0), KB or bytes below that. */
 export function sizeText(bytes: number): string {
@@ -86,8 +83,7 @@ export async function convertFile(
       return { textPrefix: `Attachment (${fname}):\n${extractPdfText(file.buffer) || '[No extractable text]'}` }
     }
     case 'text': {
-      let text = file.buffer.toString('utf-8')
-      if (text.length > MAX_TEXT_CHARS) text = `${text.slice(0, MAX_TEXT_CHARS)}\n\n[... content truncated ...]`
+      const text = cutText(file.buffer.toString('utf-8'))
       const fname = attachment.original_filename || attachment.filename || 'file'
       return { textPrefix: `Attachment (${fname}):\n\`\`\`\n${text}\n\`\`\`` }
     }
