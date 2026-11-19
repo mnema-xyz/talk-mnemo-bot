@@ -177,8 +177,10 @@ the message it replies to:
   question against the member and channel rate limits, and nothing is offered or
   downloaded once the daily budget is used up. A **Yes** over the limit is refused
   privately and the prompt stays, so the asker can try again later.
-- **Size limit**: Attachments up to 10 MB are supported. The size is checked
-  from metadata before downloading; files over 10 MB are refused without downloading.
+- **Size limit**: Attachments up to `MNEMO_ATTACHMENTS_MAX_BYTES` are read
+  (10 MB by default, and at most). The size is checked from metadata before
+  downloading; larger files are refused without downloading, and the refusal
+  names the configured limit.
 - **Supported types**:
   - Images (`png`, `jpeg`, `webp`, `gif` first frame) are sent to vision-capable
     models, downscaled automatically to fit provider limits (e.g. Anthropic's 5 MB
