@@ -27,7 +27,9 @@ build step. That is why the code uses only syntax that can be erased: no
   400 lines (test files 800), functions at most 80 lines, cyclomatic
   complexity at most 15. Split a file or a function instead.
 - **No new runtime dependency** without a reason that would go into the
-  README's *Dependencies* table. Prefer Node's standard library.
+  README's *Dependencies* table. Prefer Node's standard library. CI runs
+  `npm audit` on every change, and a dependency review on pull requests
+  refuses new vulnerabilities and GPL-family licenses.
 - **Never commit a secret**: no API keys, tokens, private addresses or
   personal data, also not in fixtures or examples. Use `example.org` and
   placeholders. CI's secret scan runs [gitleaks](https://github.com/gitleaks/gitleaks)
