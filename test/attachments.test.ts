@@ -1,12 +1,7 @@
 import assert from 'node:assert/strict'
-import { EventEmitter } from 'node:events'
 import { describe, it } from 'node:test'
 import { deflateSync } from 'node:zlib'
-import {
-  NotFoundError,
-  type Client,
-  type Interaction,
-} from '@mnema-xyz/bot-sdk'
+import { NotFoundError } from '@mnema-xyz/bot-sdk'
 import sharp from 'sharp'
 import {
   classifyAttachment,
@@ -14,151 +9,11 @@ import {
   extractPdfText,
   processImage,
 } from '../src/bot/attachments.ts'
-import { MnemoBot, type BotSettings } from '../src/bot/bot.ts'
-import { Engine } from '../src/engine/engine.ts'
-import { Budget, RateLimiter } from '../src/engine/limits.ts'
-import { silentLogger } from '../src/log.ts'
+import { Budget } from '../src/engine/limits.ts'
 import { anthropicProvider } from '../src/providers/anthropic.ts'
-import { fakeProvider } from '../src/providers/fake.ts'
 import { openaiProvider } from '../src/providers/openai.ts'
-import { BUILTIN_TOOLS } from '../src/tools/index.ts'
+import { fakeBtn, fileMention, isPrompt, makeStream, promptButtons, setupBot, textOf, yesOf } from './attachment-bot.ts'
 
-interface Sent {
-  content?: string
-  ephemeral?: boolean
-  components?: { components: { custom_id?: string; customId?: string; label?: string }[] }[]
-}
-
-const SETTINGS: BotSettings = {
-  allowedChannels: [],
-  adminUserIds: ['admin'],
-  maxRegenerations: 2,
-  replyInThread: false,
-  sendDisplayName: false,
-  thread: { maxTurns: 12, maxChars: 12000, ttlMs: 3600_000 },
-  vision: true,
-  attachments: {
-    enabled: true,
-    maxBytes: 10 * 1024 * 1024,
-    askConsent: true,
-  },
-}
-
-function makeStream(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
-  return new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(chunk)
-      controller.close()
-    },
-  })
-}
-
-function setupBot(
-  overSettings: Partial<BotSettings> = {},
-  clientMocks: {
-    download?: (id: string) => Promise<{ contentType: string; size: number; filename: string; stream: ReadableStream<Uint8Array> }>
-    getMessage?: (channelId: string, messageId: string) => Promise<unknown>
-  } = {},
-  fakeSteps: Parameters<typeof fakeProvider>[0] = [],
-  limits: { member?: number; channel?: number; budget?: Budget } = {},
-) {
-  const events = new EventEmitter()
-  const posted: Sent[] = []
-  const downloadCalls: string[] = []
-  const edits: { channelId: string; messageId: string; data: Sent }[] = []
-  const provider = fakeProvider(fakeSteps)
-
-  const client = Object.assign(events, {
-    commands: { set: () => Promise.resolve() },
-    setPresence: () => undefined,
-    rest: {
-      addReaction: () => Promise.resolve(),
-      removeReaction: () => Promise.resolve(),
-      createMessage: (_c: string, body: Sent) => {
-        posted.push(body)
-        const id = `msg_${posted.length}`
-        return Promise.resolve({ id, channel_id: _c, ...body })
-      },
-      editMessage: (channelId: string, messageId: string, data: Sent) => {
-        edits.push({ channelId, messageId, data })
-        return Promise.resolve()
-      },
-      getMessage: (channelId: string, messageId: string) => {
-        if (clientMocks.getMessage) return clientMocks.getMessage(channelId, messageId)
-        return Promise.reject(new NotFoundError({ status: 404, method: 'GET', path: '/api/channels/c1/messages/m1', body: { message: 'not found' } }))
-      },
-      downloadAttachment: (id: string) => {
-        downloadCalls.push(id)
-        if (clientMocks.download) return clientMocks.download(id)
-        const sample = Buffer.from('sample text content')
-        return Promise.resolve({
-          contentType: 'text/plain',
-          size: sample.length,
-          filename: 'sample.txt',
-          stream: makeStream([sample]),
-        })
-      },
-    },
-  }) as unknown as Client
-
-  const engine = new Engine({
-    provider,
-    tools: BUILTIN_TOOLS,
-    settings: {
-      persona: 'You are Mnemo.',
-      maxToolCalls: 3,
-      maxOutputTokens: 1024,
-      providerTimeoutMs: 5000,
-      toolTimeoutMs: 5000,
-      sendDisplayName: false,
-      userAgent: 'Mnemo-test',
-    },
-    memberLimit: new RateLimiter(limits.member ?? 100, 60_000),
-    channelLimit: new RateLimiter(limits.channel ?? 100, 60_000),
-    budget: limits.budget ?? new Budget({ dailyTokens: 0, dailyCostUsd: 0, inputUsdPerMTok: 0, outputUsdPerMTok: 0 }),
-    log: silentLogger,
-  })
-
-  new MnemoBot(client, engine, engine['d'].budget, { ...SETTINGS, ...overSettings }, silentLogger)
-  events.emit('ready', { user: { id: 'bot_id', username: 'mnemo', handle: 'mnemo' }, session_id: 's' })
-
-  const run = (i: object) => {
-    events.emit('interactionCreate', i)
-    return new Promise<void>((resolve) => setTimeout(resolve, 30))
-  }
-  const emitMessage = (m: object) => {
-    events.emit('messageCreate', m)
-    return new Promise<void>((resolve) => setTimeout(resolve, 50))
-  }
-
-  return { events, posted, edits, downloadCalls, provider, run, emitMessage }
-}
-
-function fakeBtn(customId: string, userId = 'u1', channelId = 'c1') {
-  const sent: Sent[] = []
-  const i = {
-    user: { id: userId, username: userId, display_name: userId },
-    channelId,
-    commandName: '',
-    customId,
-    options: new Map(),
-    fields: new Map(),
-    isCommand: () => false,
-    isButton: () => true,
-    isModalSubmit: () => false,
-    reply: (d: Sent) => Promise.resolve(void sent.push(d)),
-    deferReply: () => Promise.resolve(),
-    deferUpdate: () => Promise.resolve(),
-    editReply: (d: Sent) => Promise.resolve(void sent.push(d)),
-    followUp: (d: Sent) => Promise.resolve(void sent.push(d)),
-  }
-  return { i: i as unknown as Interaction, sent }
-}
-
-const textOf = (s: Sent | undefined) => s?.content ?? ''
-const promptButtons = (s: Sent | undefined) => s?.components?.[0]?.components ?? []
-const isPrompt = (s: Sent) => promptButtons(s).length === 2
-const yesOf = (s: Sent | undefined) => promptButtons(s)[0]?.custom_id ?? ''
 
 describe('attachment classification', () => {
   it('identifies images, pdf, text, and unsupported categories', () => {
@@ -358,18 +213,6 @@ describe('consent flow: No, wording and no consent', () => {
   })
 })
 
-/** An attachment mention of a small text file, as `user` in `channel`. */
-function fileMention(n: number, user = 'u1', channel = 'c1', size = 20) {
-  return {
-    id: `m${n}`,
-    channel_id: channel,
-    user_id: user,
-    username: user,
-    mentions: ['bot_id'],
-    content: '<@bot_id> read this',
-    attachments: [{ id: `att${n}`, filename: 'file.txt', mime_type: 'text/plain', size_bytes: size }],
-  }
-}
 
 
 describe('attachment questions and the limits', () => {

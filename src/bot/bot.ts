@@ -14,13 +14,20 @@ import { attachmentRefusal, convertFile, downloadFile, type ReaderDeps } from '.
 import { classifyAttachment, type AttachmentClassification } from './attachments.ts'
 import { NO_PINGS, post, react, Serial, stripMention, whereFor, type Where } from './chat.ts'
 import { commandsFor } from './commands.ts'
-import { Consents } from './consent.ts'
+import { Consents, type FoundAttachment } from './consent.ts'
 import { Interactions } from './interactions.ts'
 import { maxAttachmentBytes, type BotSettings } from './settings.ts'
 
 export type { BotSettings } from './settings.ts'
 
 const attachmentsOf = (m: Message) => (m as { attachments?: Attachment[] }).attachments ?? []
+
+/** The first attachment of a message, with its author. */
+function foundOn(m: Message): FoundAttachment | undefined {
+  const all = attachmentsOf(m)
+  const attachment = all[0]
+  return attachment ? { attachment, ownerId: m.user_id, ownerName: m.display_name || m.username || 'someone', total: all.length } : undefined
+}
 
 export class MnemoBot {
   private selfId = ''
@@ -108,20 +115,21 @@ export class MnemoBot {
     // a thread is answered there.
     const threadId = m.parent_id ?? (this.s.replyInThread ? m.id : undefined)
     const where = whereFor(m, threadId)
-    const attachment = await this.findAttachment(m)
-    if (attachment) return this.onAttachment(m, threadId, where, attachment)
+    const found = await this.findAttachment(m)
+    if (found) return this.onAttachment(m, threadId, where, found)
     if (await this.refusedInChannel(m, where)) return
     await this.serial(threadId ?? m.id, () => this.sendAnswer(m, threadId, this.stripMention(m.content)))
   }
 
-  private async onAttachment(m: Message, threadId: string | undefined, where: Where, attachment: Attachment): Promise<void> {
+  private async onAttachment(m: Message, threadId: string | undefined, where: Where, found: FoundAttachment): Promise<void> {
+    const { attachment } = found
     const classification = classifyAttachment(attachment)
     const refusal = attachmentRefusal(this.s, attachment, classification)
     if (refusal) return post(this.client, m.channel_id, refusal, undefined, where)
     // A consent prompt counts against the limits like a question, so a flood
     // of attachment mentions neither posts one prompt each nor skips them.
     if (await this.refusedInChannel(m, where)) return
-    if (this.s.attachments?.askConsent ?? true) return this.consents.ask(m, threadId, where, attachment, classification)
+    if (this.s.attachments?.askConsent ?? true) return this.consents.ask(m, threadId, where, found, classification)
     await this.serial(threadId ?? m.id, () => this.answerWithAttachment(m, threadId, attachment, classification))
   }
 
@@ -134,14 +142,15 @@ export class MnemoBot {
     return true
   }
 
-  /** The message's first attachment, else the first of the message it replies to. */
-  private async findAttachment(m: Message): Promise<Attachment | undefined> {
-    const own = attachmentsOf(m)
-    if (own.length > 0) return own[0]
+  /** The message's first attachment, else the first of the message it
+   * replies to, with whose message it is. */
+  private async findAttachment(m: Message): Promise<FoundAttachment | undefined> {
+    const own = foundOn(m)
+    if (own) return own
     const replyId = m.reply_to_id ?? m.reply_to?.id
     if (!replyId) return undefined
     try {
-      return attachmentsOf(await this.client.rest.getMessage(m.channel_id, replyId))[0]
+      return foundOn(await this.client.rest.getMessage(m.channel_id, replyId))
     } catch {
       // If fetching the replied-to message fails, answer without it.
       return undefined

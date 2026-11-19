@@ -168,8 +168,12 @@ Mnemo can read images and files attached to the message that mentions it, or to
 the message it replies to:
 
 - **Consent first**: Before downloading or sending anything to an AI provider,
-  Mnemo asks in the channel with **Yes, check it** and **No** buttons. Only the
-  member who asked can answer, and the question expires after 10 minutes. If
+  Mnemo asks in the channel with **Yes, check it** and **No** buttons. The
+  prompt names the file and whose it is (the asker's own, or the author of the
+  message the question replies to). Mnemo reads one file per question, the first
+  attachment of that message, and the prompt says so when there are more. Only
+  the member who asked can answer. After 10 minutes the question expires: the
+  buttons go and the prompt says it expired, so the asker knows to ask again. If
   using a local model (`attachments.local: true` / `MNEMO_ATTACHMENTS_LOCAL=true`),
   the prompt states that the file stays on this server and will be processed by
   the local model. Consent can be disabled with `MNEMO_ATTACHMENTS_ASK_CONSENT=false`.
