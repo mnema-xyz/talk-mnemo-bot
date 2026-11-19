@@ -191,50 +191,57 @@ function readFileConfig(path: string, problems: string[]): Record<string, unknow
   return obj
 }
 
-/** Reads and checks the configuration. Throws ConfigError listing every problem. */
-export function loadConfig(env: Env = process.env): Config {
-  const problems: string[] = []
+/** The attachment env vars, each overriding its key of `attachments`. */
+const ATTACHMENT_ENV = {
+  enabled: 'MNEMO_ATTACHMENTS_ENABLED',
+  maxBytes: 'MNEMO_ATTACHMENTS_MAX_BYTES',
+  askConsent: 'MNEMO_ATTACHMENTS_ASK_CONSENT',
+  providerName: 'MNEMO_ATTACHMENTS_PROVIDER_NAME',
+  local: 'MNEMO_ATTACHMENTS_LOCAL',
+} as const
+
+/** The config file, then the environment on top of it. */
+function mergedSettings(env: Env, problems: string[]): Record<string, unknown> {
   const merged: Record<string, unknown> = env.MNEMO_CONFIG ? readFileConfig(env.MNEMO_CONFIG, problems) : {}
   for (const [key, name] of Object.entries(ENV)) {
     const v = env[name]
     if (v !== undefined && v.trim() !== '') merged[key] = v.trim()
   }
+  merged.attachments = attachmentSettings(merged.attachments, env, problems)
+  return merged
+}
 
-  let attObj: Record<string, unknown> = {}
-  if (typeof merged.attachments === 'string') {
+/** `attachments` as an object (MNEMO_ATTACHMENTS may hold it as JSON), with
+ * the single attachment variables on top. */
+function attachmentSettings(raw: unknown, env: Env, problems: string[]): Record<string, unknown> {
+  let att: Record<string, unknown> = {}
+  if (typeof raw === 'string') {
     try {
-      attObj = JSON.parse(merged.attachments) as Record<string, unknown>
+      att = JSON.parse(raw) as Record<string, unknown>
     } catch {
       problems.push('MNEMO_ATTACHMENTS: must be valid JSON')
     }
-  } else if (typeof merged.attachments === 'object' && merged.attachments !== null) {
-    attObj = { ...(merged.attachments as Record<string, unknown>) }
+  } else if (typeof raw === 'object' && raw !== null) {
+    att = { ...(raw as Record<string, unknown>) }
   }
-  if (env.MNEMO_ATTACHMENTS_ENABLED !== undefined) attObj.enabled = env.MNEMO_ATTACHMENTS_ENABLED.trim()
-  if (env.MNEMO_ATTACHMENTS_MAX_BYTES !== undefined) attObj.maxBytes = env.MNEMO_ATTACHMENTS_MAX_BYTES.trim()
-  if (env.MNEMO_ATTACHMENTS_ASK_CONSENT !== undefined) attObj.askConsent = env.MNEMO_ATTACHMENTS_ASK_CONSENT.trim()
-  if (env.MNEMO_ATTACHMENTS_PROVIDER_NAME !== undefined) attObj.providerName = env.MNEMO_ATTACHMENTS_PROVIDER_NAME.trim()
-  if (env.MNEMO_ATTACHMENTS_LOCAL !== undefined) attObj.local = env.MNEMO_ATTACHMENTS_LOCAL.trim()
-  merged.attachments = attObj
-
-  const parsed = SettingsSchema.safeParse(merged)
-  if (!parsed.success) {
-    for (const issue of parsed.error.issues) {
-      const key = String(issue.path[0] ?? '')
-      const name = ENV[key as keyof typeof ENV] as string | undefined
-      problems.push(`${name ?? key}: ${issue.code === 'invalid_type' && merged[key] === undefined ? 'is required' : issue.message}`)
-    }
+  for (const [key, name] of Object.entries(ATTACHMENT_ENV)) {
+    const v = env[name]
+    if (v !== undefined) att[key] = v.trim()
   }
+  return att
+}
 
-  const mnemaToken = readSecret(env, SECRETS.mnemaToken, problems)
-  const apiKey = readSecret(env, SECRETS.apiKey, problems)
-  const searchApiKey = readSecret(env, SECRETS.searchApiKey, problems)
-  if (!mnemaToken) problems.push('MNEMA_TOKEN (or MNEMA_TOKEN_FILE) is required: the bot token from Admin area > Bots')
+function schemaProblems(error: z.ZodError, merged: Record<string, unknown>): string[] {
+  return error.issues.map((issue) => {
+    const key = String(issue.path[0] ?? '')
+    const name = ENV[key as keyof typeof ENV] as string | undefined
+    return `${name ?? key}: ${issue.code === 'invalid_type' && merged[key] === undefined ? 'is required' : issue.message}`
+  })
+}
 
-  if (!parsed.success) throw new ConfigError(problems)
-  const s = parsed.data
-
-  const model = s.model ?? DEFAULT_MODEL[s.provider]
+/** Settings that only make sense together. */
+function combinationProblems(s: Settings, model: string | undefined, apiKey: string | undefined, searchApiKey: string | undefined): string[] {
+  const problems: string[] = []
   if (!model) problems.push(`MNEMO_MODEL is required for the ${s.provider} provider`)
   if ((s.provider === 'anthropic' || s.provider === 'openai') && !apiKey) {
     problems.push(`MNEMO_API_KEY (or MNEMO_API_KEY_FILE) is required for the ${s.provider} provider`)
@@ -245,23 +252,50 @@ export function loadConfig(env: Env = process.env): Config {
   if (s.searchProvider && !searchApiKey) problems.push('MNEMO_SEARCH_PROVIDER is set but MNEMO_SEARCH_API_KEY is missing')
   if (searchApiKey && !s.searchProvider) problems.push('MNEMO_SEARCH_API_KEY is set; also set MNEMO_SEARCH_PROVIDER to brave or tavily')
   if (s.systemPrompt && s.systemPromptFile) problems.push('MNEMO_SYSTEM_PROMPT and MNEMO_SYSTEM_PROMPT_FILE are both set; use one')
+  return problems
+}
 
-  let systemPrompt = s.systemPrompt
-  if (s.systemPromptFile) {
-    try {
-      systemPrompt = readFileSync(s.systemPromptFile, 'utf8').trim()
-      if (!systemPrompt) problems.push('MNEMO_SYSTEM_PROMPT_FILE points to an empty file')
-    } catch {
-      problems.push(`MNEMO_SYSTEM_PROMPT_FILE: cannot read ${s.systemPromptFile}`)
-    }
+function systemPromptOf(s: Settings, problems: string[]): string | undefined {
+  if (!s.systemPromptFile) return s.systemPrompt
+  try {
+    const prompt = readFileSync(s.systemPromptFile, 'utf8').trim()
+    if (!prompt) problems.push('MNEMO_SYSTEM_PROMPT_FILE points to an empty file')
+    return prompt
+  } catch {
+    problems.push(`MNEMO_SYSTEM_PROMPT_FILE: cannot read ${s.systemPromptFile}`)
+    return s.systemPrompt
   }
+}
 
+/** The configured prices, else the known ones for the model, else 0. */
+function pricesOf(s: Settings, model: string | undefined, problems: string[]): { priceInputPerMTok: number; priceOutputPerMTok: number } {
   const known = model ? KNOWN_PRICES[model] : undefined
   const priceInputPerMTok = s.priceInputPerMTok ?? known?.input ?? 0
   const priceOutputPerMTok = s.priceOutputPerMTok ?? known?.output ?? 0
   if (s.dailyCostBudgetUsd > 0 && priceInputPerMTok === 0 && priceOutputPerMTok === 0) {
     problems.push(`MNEMO_DAILY_COST_BUDGET_USD needs prices: set MNEMO_PRICE_INPUT_PER_MTOK and MNEMO_PRICE_OUTPUT_PER_MTOK for ${model ?? 'the model'}`)
   }
+  return { priceInputPerMTok, priceOutputPerMTok }
+}
+
+/** Reads and checks the configuration. Throws ConfigError listing every problem. */
+export function loadConfig(env: Env = process.env): Config {
+  const problems: string[] = []
+  const merged = mergedSettings(env, problems)
+  const parsed = SettingsSchema.safeParse(merged)
+  if (!parsed.success) problems.push(...schemaProblems(parsed.error, merged))
+
+  const mnemaToken = readSecret(env, SECRETS.mnemaToken, problems)
+  const apiKey = readSecret(env, SECRETS.apiKey, problems)
+  const searchApiKey = readSecret(env, SECRETS.searchApiKey, problems)
+  if (!mnemaToken) problems.push('MNEMA_TOKEN (or MNEMA_TOKEN_FILE) is required: the bot token from Admin area > Bots')
+
+  if (!parsed.success) throw new ConfigError(problems)
+  const s = parsed.data
+  const model = s.model ?? DEFAULT_MODEL[s.provider]
+  problems.push(...combinationProblems(s, model, apiKey, searchApiKey))
+  const systemPrompt = systemPromptOf(s, problems)
+  const prices = pricesOf(s, model, problems)
 
   if (problems.length > 0) throw new ConfigError(problems)
   const { systemPromptFile, ...rest } = s
@@ -272,7 +306,6 @@ export function loadConfig(env: Env = process.env): Config {
     mnemaToken: mnemaToken as string,
     apiKey: apiKey ?? '',
     searchApiKey,
-    priceInputPerMTok,
-    priceOutputPerMTok,
+    ...prices,
   }
 }

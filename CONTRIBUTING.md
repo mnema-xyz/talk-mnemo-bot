@@ -23,6 +23,9 @@ build step. That is why the code uses only syntax that can be erased: no
   real AI provider. Use `fakeProvider` and `recordedFetch`
   (`test/helpers.ts`), and put recorded responses in `test/fixtures/`.
   Test behaviour (what a member or the model sees), not internals.
+- **Code limits**, checked by `npm run lint` and never raised: files at most
+  400 lines (test files 800), functions at most 80 lines, cyclomatic
+  complexity at most 15. Split a file or a function instead.
 - **No new runtime dependency** without a reason that would go into the
   README's *Dependencies* table. Prefer Node's standard library.
 - **Never commit a secret**: no API keys, tokens, private addresses or

@@ -15,7 +15,16 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true, argsIgnorePattern: '^_' }],
       'no-eval': 'error',
       'no-new-func': 'error',
+      // Code limits (never raised): files 400 lines, test files 800,
+      // functions 80, cyclomatic complexity 15.
+      'max-lines': ['error', { max: 400, skipBlankLines: false, skipComments: false }],
+      'max-lines-per-function': ['error', { max: 80, skipBlankLines: false, skipComments: false, IIFEs: true }],
+      complexity: ['error', 15],
     },
+  },
+  {
+    files: ['test/**/*.ts'],
+    rules: { 'max-lines': ['error', { max: 800, skipBlankLines: false, skipComments: false }] },
   },
   {
     // node:test's describe and it return promises the runner tracks itself.

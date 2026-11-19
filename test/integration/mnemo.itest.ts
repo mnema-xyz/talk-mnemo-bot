@@ -76,110 +76,122 @@ const buttonId = (m: Msg, label: string): string => {
   return id
 }
 
-describe('Mnemo on a real Mnema Talk', { skip: !URL_ && 'run through scripts/integration.sh' }, () => {
-  const owner = new Session()
-  let channelId = ''
-  let botUserId = ''
-  let botUsername = ''
-  let mnemo: ChildProcess | undefined
-  let healthUrl = ''
-  const logs: string[] = []
+const skip = !URL_ && 'run through scripts/integration.sh'
 
-  before(async () => {
-    await owner.ok('POST', '/api/auth/login', { username: USER, password: PASSWORD })
-    const ch = await owner.ok<{ id: string }>('POST', '/api/admin/channels', { name: 'mnemo-it', type: 'text' })
-    channelId = ch.id
+/** The running stack: the Owner's session, the channel, the bot and Mnemo's process. */
+const w = {
+  owner: new Session(),
+  channelId: '',
+  botUserId: '',
+  botUsername: '',
+  mnemo: undefined as ChildProcess | undefined,
+  healthUrl: '',
+  logs: [] as string[],
+}
 
-    const manifest = JSON.parse(readFileSync(new URL('../../mnemo.manifest.json', import.meta.url), 'utf8')) as {
-      permissions: string[]
-      intents: string[]
-    }
-    const installed = await owner.ok<{ bot: { user_id: string; username?: string }; token: { secret: string } }>('POST', '/api/admin/bots/install', {
-      manifest,
-      permissions: manifest.permissions,
-      intents: manifest.intents,
-      channel_ids: [channelId],
-    })
-    botUserId = installed.bot.user_id
-    const members = await owner.ok<{ id: string; username: string }[]>('GET', '/api/members')
-    botUsername = members.find((m) => m.id === botUserId)?.username ?? installed.bot.username ?? ''
-    assert.ok(botUsername, 'the bot is listed as a member')
+/** Logs the Owner in, adds Mnemo from its manifest and starts it with the fake provider. */
+async function startMnemo(): Promise<void> {
+  await w.owner.ok('POST', '/api/auth/login', { username: USER, password: PASSWORD })
+  const ch = await w.owner.ok<{ id: string }>('POST', '/api/admin/channels', { name: 'mnemo-it', type: 'text' })
+  w.channelId = ch.id
 
-    const port = await freePort()
-    healthUrl = `http://127.0.0.1:${port}/healthz`
-    mnemo = spawn(process.execPath, ['src/main.ts'], {
-      cwd: new URL('../../', import.meta.url),
-      env: {
-        PATH: process.env.PATH,
-        MNEMA_URL: URL_,
-        MNEMA_TOKEN: installed.token.secret,
-        MNEMO_PROVIDER: 'fake',
-        MNEMO_HEALTH_PORT: String(port),
-        MNEMO_LOG_LEVEL: 'debug',
-        MNEMO_MEMBER_LIMIT_PER_MINUTE: '8',
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    mnemo.stdout?.on('data', (d: Buffer) => logs.push(d.toString()))
-    mnemo.stderr?.on('data', (d: Buffer) => logs.push(d.toString()))
-    await until('Mnemo to connect', async () => {
-      const r = await fetch(healthUrl).catch(() => undefined)
-      return r?.status === 200 ? true : undefined
-    })
+  const manifest = JSON.parse(readFileSync(new URL('../../mnemo.manifest.json', import.meta.url), 'utf8')) as {
+    permissions: string[]
+    intents: string[]
+  }
+  const installed = await w.owner.ok<{ bot: { user_id: string; username?: string }; token: { secret: string } }>('POST', '/api/admin/bots/install', {
+    manifest,
+    permissions: manifest.permissions,
+    intents: manifest.intents,
+    channel_ids: [w.channelId],
   })
+  w.botUserId = installed.bot.user_id
+  const members = await w.owner.ok<{ id: string; username: string }[]>('GET', '/api/members')
+  w.botUsername = members.find((m) => m.id === w.botUserId)?.username ?? installed.bot.username ?? ''
+  assert.ok(w.botUsername, 'the bot is listed as a member')
 
-  after(() => {
-    if (mnemo && mnemo.exitCode === null) mnemo.kill('SIGKILL')
-    // Mnemo's own log, for a failed run (git-ignored).
-    writeFileSync(new URL('./mnemo.log', import.meta.url), logs.join(''))
+  const port = await freePort()
+  w.healthUrl = `http://127.0.0.1:${port}/healthz`
+  w.mnemo = spawn(process.execPath, ['src/main.ts'], {
+    cwd: new URL('../../', import.meta.url),
+    env: {
+      PATH: process.env.PATH,
+      MNEMA_URL: URL_,
+      MNEMA_TOKEN: installed.token.secret,
+      MNEMO_PROVIDER: 'fake',
+      MNEMO_HEALTH_PORT: String(port),
+      MNEMO_LOG_LEVEL: 'debug',
+      MNEMO_MEMBER_LIMIT_PER_MINUTE: '8',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
+  w.mnemo.stdout?.on('data', (d: Buffer) => w.logs.push(d.toString()))
+  w.mnemo.stderr?.on('data', (d: Buffer) => w.logs.push(d.toString()))
+  await until('Mnemo to connect', async () => {
+    const r = await fetch(w.healthUrl).catch(() => undefined)
+    return r?.status === 200 ? true : undefined
+  })
+}
 
-  const thread = async (rootId: string) => (await owner.ok<{ replies: Msg[] }>('GET', `/api/messages/${rootId}/thread`)).replies
-  const channelMessages = () => owner.ok<Msg[]>('GET', `/api/channels/${channelId}/messages?limit=50`)
-  const fromBot = (ms: Msg[]) => ms.filter((m) => m.user_id === botUserId)
+function stopMnemo(): void {
+  if (w.mnemo && w.mnemo.exitCode === null) w.mnemo.kill('SIGKILL')
+  // Mnemo's own log, for a failed run (git-ignored).
+  writeFileSync(new URL('./mnemo.log', import.meta.url), w.logs.join(''))
+}
 
+const thread = async (rootId: string) => (await w.owner.ok<{ replies: Msg[] }>('GET', `/api/messages/${rootId}/thread`)).replies
+const channelMessages = () => w.owner.ok<Msg[]>('GET', `/api/channels/${w.channelId}/messages?limit=50`)
+const fromBot = (ms: Msg[]) => ms.filter((m) => m.user_id === w.botUserId)
+
+before(async () => {
+  if (!skip) await startMnemo()
+})
+after(() => {
+  if (!skip) stopMnemo()
+})
+
+describe('Mnemo on a real Mnema Talk: mentions and threads', { skip }, () => {
   it('answers a mention in a new thread under the question, with buttons', async () => {
-    const q = await owner.ok<Msg>('POST', `/api/channels/${channelId}/messages`, { content: `@${botUsername} what is 2+2?` })
+    const q = await w.owner.ok<Msg>('POST', `/api/channels/${w.channelId}/messages`, { content: `@${w.botUsername} what is 2+2?` })
     const reply = await until('the answer in the thread', async () => fromBot(await thread(q.id)).at(0))
     assert.equal(reply.content, 'You asked: what is 2+2?')
     assert.equal(reply.parent_id, q.id)
-    assert.deepEqual(labels(reply), ['Regenerate', 'Details'])
+    assert.deepEqual(labels(reply), ['Regenerate'])
 
     // In its thread Mnemo answers without a mention and keeps the context.
-    await owner.ok('POST', `/api/channels/${channelId}/messages`, { content: 'and 3+3?', parent_id: q.id })
+    await w.owner.ok('POST', `/api/channels/${w.channelId}/messages`, { content: 'and 3+3?', parent_id: q.id })
     const second = await until('the second answer', async () => fromBot(await thread(q.id)).at(1))
     assert.equal(second.content, 'You asked: and 3+3? (with 2 earlier messages)')
   })
 
   it('answers a mention in somebody else\'s thread once, without following that thread', async () => {
-    const root = await owner.ok<Msg>('POST', `/api/channels/${channelId}/messages`, { content: 'a thread of our own' })
-    await owner.ok('POST', `/api/channels/${channelId}/messages`, { content: `@${botUsername} what is 5+5?`, parent_id: root.id })
+    const root = await w.owner.ok<Msg>('POST', `/api/channels/${w.channelId}/messages`, { content: 'a thread of our own' })
+    await w.owner.ok('POST', `/api/channels/${w.channelId}/messages`, { content: `@${w.botUsername} what is 5+5?`, parent_id: root.id })
     const reply = await until('the answer in that thread', async () => fromBot(await thread(root.id)).at(0))
     assert.equal(reply.content, 'You asked: what is 5+5?')
-    await owner.ok('POST', `/api/channels/${channelId}/messages`, { content: 'thanks, carry on', parent_id: root.id })
+    await w.owner.ok('POST', `/api/channels/${w.channelId}/messages`, { content: 'thanks, carry on', parent_id: root.id })
     await new Promise((r) => setTimeout(r, 1500))
     assert.equal(fromBot(await thread(root.id)).length, 1)
   })
 
   it('ignores messages that do not mention it outside its threads', async () => {
-    const q = await owner.ok<Msg>('POST', `/api/channels/${channelId}/messages`, { content: 'just chatting' })
+    const q = await w.owner.ok<Msg>('POST', `/api/channels/${w.channelId}/messages`, { content: 'just chatting' })
     await new Promise((r) => setTimeout(r, 1500))
     assert.equal(fromBot(await thread(q.id)).length, 0)
   })
+})
 
+describe('Mnemo on a real Mnema Talk: /ask, limits and shutdown', { skip }, () => {
   it('answers /ask, and Regenerate replaces the buttons with a new answer', async () => {
-    const commands = await owner.ok<{ id: string; name: string; bot_name?: string }[]>('GET', `/api/channels/${channelId}/commands`)
+    const commands = await w.owner.ok<{ id: string; name: string; bot_name?: string }[]>('GET', `/api/channels/${w.channelId}/commands`)
     const ask = commands.find((c) => c.name === 'ask' && c.bot_name)
     assert.ok(ask, 'the manifest registered /ask')
-    const run = await owner.call('POST', `/api/channels/${channelId}/interactions`, { command_id: ask.id, options: { question: 'hello there' } })
+    const run = await w.owner.call('POST', `/api/channels/${w.channelId}/interactions`, { command_id: ask.id, options: { question: 'hello there' } })
     assert.equal(run.status, 202)
     const answer = await until('the /ask answer', async () => fromBot(await channelMessages()).find((m) => m.content === 'You asked: hello there'))
-    assert.deepEqual(labels(answer), ['Regenerate', 'Details', 'Follow up'])
+    assert.deepEqual(labels(answer), ['Regenerate', 'Follow up'])
 
-    const details = await owner.call('POST', `/api/channels/${channelId}/messages/${answer.id}/components`, { custom_id: buttonId(answer, 'Details') })
-    assert.equal(details.status, 202)
-
-    const regen = await owner.call('POST', `/api/channels/${channelId}/messages/${answer.id}/components`, { custom_id: buttonId(answer, 'Regenerate') })
+    const regen = await w.owner.call('POST', `/api/channels/${w.channelId}/messages/${answer.id}/components`, { custom_id: buttonId(answer, 'Regenerate') })
     assert.equal(regen.status, 202)
     await until('the old buttons to go', async () => {
       const m = (await channelMessages()).find((x) => x.id === answer.id)
@@ -188,13 +200,13 @@ describe('Mnemo on a real Mnema Talk', { skip: !URL_ && 'run through scripts/int
     const again = await until('the regenerated answer', async () =>
       fromBot(await channelMessages()).find((m) => m.id !== answer.id && m.content === 'You asked: hello there'),
     )
-    assert.deepEqual(labels(again), ['Regenerate', 'Details', 'Follow up'])
+    assert.deepEqual(labels(again), ['Regenerate', 'Follow up'])
   })
 
   it('tells a member who floods it about the limit once, and drops the rest quietly', async () => {
     const asked: Msg[] = []
     for (let n = 0; n < 10; n++) {
-      asked.push(await owner.ok<Msg>('POST', `/api/channels/${channelId}/messages`, { content: `@${botUsername} flood ${n}` }))
+      asked.push(await w.owner.ok<Msg>('POST', `/api/channels/${w.channelId}/messages`, { content: `@${w.botUsername} flood ${n}` }))
     }
     const replies = async () => (await Promise.all(asked.map(async (q) => fromBot(await thread(q.id))))).flat()
     await until('the refusal', async () => ((await replies()).some((m) => /asking quickly/.test(m.content)) ? true : undefined))
@@ -212,15 +224,15 @@ describe('Mnemo on a real Mnema Talk', { skip: !URL_ && 'run through scripts/int
   })
 
   it('reports healthy and stops cleanly on SIGTERM', async () => {
-    const health = (await (await fetch(healthUrl)).json()) as { status: string; provider: string }
+    const health = (await (await fetch(w.healthUrl)).json()) as { status: string; provider: string }
     assert.equal(health.status, 'ok')
     assert.equal(health.provider, 'fake')
     const exited = new Promise<number | null>((resolve) => {
-      mnemo?.once('exit', (code) => {
+      w.mnemo?.once('exit', (code) => {
         resolve(code)
       })
     })
-    mnemo?.kill('SIGTERM')
+    w.mnemo?.kill('SIGTERM')
     assert.equal(await exited, 0)
   })
 })

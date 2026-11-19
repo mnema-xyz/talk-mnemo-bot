@@ -31,31 +31,36 @@ const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v', 'wmv'])
 const OFFICE_EXTS = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp'])
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif'])
 
-export function classifyAttachment(att: Attachment): AttachmentClassification {
+type FileTest = (ext: string, mime: string) => boolean
+
+const hasAny = (mime: string, parts: string[]) => parts.some((p) => mime.includes(p))
+const isImage: FileTest = (ext, mime) => IMAGE_EXTS.has(ext) || mime.startsWith('image/')
+const isPdf: FileTest = (ext, mime) => ext === 'pdf' || mime === 'application/pdf'
+const isText: FileTest = (ext, mime) =>
+  TEXT_EXTS.has(ext) || mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml'
+
+/** What an unsupported file is called in the refusal, first match wins. */
+const UNSUPPORTED_KINDS: [string, FileTest][] = [
+  ['zip', (ext, mime) => ARCHIVE_EXTS.has(ext) || hasAny(mime, ['zip', 'tar', 'compressed'])],
+  ['audio', (ext, mime) => AUDIO_EXTS.has(ext) || mime.startsWith('audio/')],
+  ['video', (ext, mime) => VIDEO_EXTS.has(ext) || mime.startsWith('video/')],
+  ['office', (ext, mime) => OFFICE_EXTS.has(ext) || hasAny(mime, ['word', 'sheet', 'presentation', 'officedocument'])],
+]
+
+/** The lower-case MIME type and file extension of an attachment. */
+function fileParts(att: Attachment): { mime: string; ext: string } {
   const mime = (att.content_type || att.mime_type || '').toLowerCase()
   const name = (att.filename || att.original_filename || '').toLowerCase()
   const ext = name.includes('.') ? name.split('.').pop() ?? '' : ''
+  return { mime, ext }
+}
 
-  if (IMAGE_EXTS.has(ext) || mime.startsWith('image/')) {
-    return { type: 'image', fileType: 'image', mimeType: mime || `image/${ext || 'jpeg'}` }
-  }
-  if (ext === 'pdf' || mime === 'application/pdf') {
-    return { type: 'pdf', fileType: 'pdf', mimeType: 'application/pdf' }
-  }
-  if (TEXT_EXTS.has(ext) || mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
-    return { type: 'text', fileType: ext || 'text', mimeType: mime || 'text/plain' }
-  }
-
-  let fileType = ext || 'binary'
-  if (ARCHIVE_EXTS.has(ext) || mime.includes('zip') || mime.includes('tar') || mime.includes('compressed')) {
-    fileType = 'zip'
-  } else if (AUDIO_EXTS.has(ext) || mime.startsWith('audio/')) {
-    fileType = 'audio'
-  } else if (VIDEO_EXTS.has(ext) || mime.startsWith('video/')) {
-    fileType = 'video'
-  } else if (OFFICE_EXTS.has(ext) || mime.includes('word') || mime.includes('sheet') || mime.includes('presentation') || mime.includes('officedocument')) {
-    fileType = 'office'
-  }
+export function classifyAttachment(att: Attachment): AttachmentClassification {
+  const { mime, ext } = fileParts(att)
+  if (isImage(ext, mime)) return { type: 'image', fileType: 'image', mimeType: mime || `image/${ext || 'jpeg'}` }
+  if (isPdf(ext, mime)) return { type: 'pdf', fileType: 'pdf', mimeType: 'application/pdf' }
+  if (isText(ext, mime)) return { type: 'text', fileType: ext || 'text', mimeType: mime || 'text/plain' }
+  const fileType = UNSUPPORTED_KINDS.find(([, test]) => test(ext, mime))?.[0] ?? (ext || 'binary')
   return { type: 'unsupported', fileType, mimeType: mime || 'application/octet-stream' }
 }
 
