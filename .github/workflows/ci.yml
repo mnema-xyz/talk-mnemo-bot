@@ -61,6 +61,22 @@ jobs:
           echo "scanning commits: $range"
           "$gitleaks" git --no-banner --redact --exit-code 1 --log-opts="$range" .
 
+  # What a pull request changes in the dependencies: new vulnerabilities and
+  # licenses that do not fit the MIT project are refused.
+  dependency-review:
+    name: dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: low
+          deny-licenses: AGPL-3.0-only, AGPL-3.0-or-later, GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later
+
   check:
     name: lint, typecheck, test
     runs-on: ubuntu-latest
@@ -74,6 +90,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: npm audit (all dependencies, any severity)
+        run: npm audit --audit-level=low
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
