@@ -24,6 +24,7 @@ buttons **Regenerate** (limited, see `MNEMO_MAX_REGENERATIONS`) and, for `/ask`,
 ---
 
 - [Quick start (5 minutes)](#quick-start-5-minutes)
+- [Install on Unraid](#install-on-unraid)
 - [How Mnemo answers](#how-mnemo-answers)
 - [Configuration](#configuration)
 - [AI providers](#ai-providers)
@@ -140,6 +141,46 @@ in the member list.
 
 In a channel you ticked, write `@`, pick Mnemo from the list and ask, or
 type `/ask`. Nothing happens? See [Troubleshooting](#troubleshooting).
+
+## Install on Unraid
+
+Mnemo is a single container with no ports, so it installs from the Community
+Apps *Apps* tab like any other app. It needs a Mnema Talk server 3.1 or newer
+on which you are the Owner (or hold *Manage bots*), for example one installed
+from the [Mnema Talk template](https://github.com/mnema-xyz/talk/blob/main/doc/platform-notes.md#install-on-unraid-via-community-apps).
+
+1. **Create the bot in Talk.** Sign in as the Owner and open **Admin area >
+   Bots > Add from manifest**. Paste the contents of
+   [`mnemo.manifest.json`](mnemo.manifest.json), confirm, and **tick the
+   channels where Mnemo may work** (none are ticked at first). Talk shows the
+   bot's **token once**: copy it now. If you lose it, regenerate it under
+   Admin area > Bots.
+2. **Install.** In the *Apps* tab search for *Mnemo* and click *Install*.
+3. **Fill in the template.**
+   - *Talk server URL*: the address your members open, with `https://`.
+   - *Bot token*: the token from step 1.
+   - *AI provider* and *AI API key*: `anthropic` (the default) with your key
+     from the provider's console. For OpenAI choose `openai`. For a local
+     model choose `openai-compatible`, enter the *Provider base URL* (for
+     example `http://192.168.1.10:11434/v1` for Ollama) and an *AI model* name;
+     no key is needed. No AI account yet? Choose `fake`: Mnemo echoes your
+     question, which checks the connection and permissions at no cost.
+   - *AI model*: leave empty for `claude-haiku-5-5` on Anthropic; the other
+     providers need a model name.
+   - *Daily token budget* and the per-minute limits are under *Show more
+     settings*; the defaults (1,000,000 tokens a day, 5 questions per member
+     and 20 per channel per minute) cost roughly ten cents a day on the default
+     model. See [Costs and limits](#costs-and-limits).
+4. **Apply, then check the log.** The Docker tab's log shows `"msg":"ready"`
+   once Mnemo is connected, and it appears online in the member list. In a
+   channel you ticked, mention Mnemo or type `/ask`.
+
+The *Appdata path* (`/mnt/user/appdata/mnemo`) holds only the day's token
+count, so a restart cannot reset the budget. The container runs read-only with
+all capabilities dropped. To update, use the Docker tab's *check for updates*;
+the template follows the `0.1` tag, which carries the patch releases (read the
+[changelog](CHANGELOG.md) before changing the minor line). Problems:
+[Troubleshooting](#troubleshooting).
 
 ## How Mnemo answers
 
