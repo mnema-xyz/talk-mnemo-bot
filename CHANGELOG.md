@@ -8,6 +8,18 @@ written by release-please from the commit titles. Container images:
 Mnemo is licensed under the MIT License from the release after 0.1.3. Earlier
 releases (up to and including 0.1.3) stay AGPL-3.0-only.
 
+## [0.1.14](https://github.com/mnema-xyz/talk-mnemo-bot/compare/v0.1.13...v0.1.14) (2026-11-19)
+
+
+### Features
+
+* **bot:** the consent prompt names the file and its owner, and says when it expired ([#37](https://github.com/mnema-xyz/talk-mnemo-bot/issues/37)) ([c0f1baf](https://github.com/mnema-xyz/talk-mnemo-bot/commit/c0f1baf45d3b31f9c1189049886966fe03464014))
+
+
+### Bug Fixes
+
+* **bot:** bound attachment reading and keep files out of thread memory ([#39](https://github.com/mnema-xyz/talk-mnemo-bot/issues/39)) ([740bce6](https://github.com/mnema-xyz/talk-mnemo-bot/commit/740bce665c23e542dae1925093d66859b6e99779))
+
 ## [0.1.13](https://github.com/mnema-xyz/talk-mnemo-bot/compare/v0.1.12...v0.1.13) (2026-11-19)
 
 
