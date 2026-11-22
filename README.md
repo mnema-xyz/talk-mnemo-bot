@@ -44,7 +44,8 @@ buttons **Regenerate** (limited, see `MNEMO_MAX_REGENERATIONS`) and, for `/ask`,
 
 **Requires Mnema Talk 3.1.0 or newer**: the first release that contains the bot platform (3.1 or later).
 Older servers have no manifests, buttons or bot SDK, and Mnemo cannot be
-added to them.
+added to them. Reading attachments needs Mnema Talk 3.3.0 or newer (the first
+release that lets bots download them); on an older server Mnemo says so instead.
 
 You need a Mnema Talk server on which you are the Owner (or hold *Manage
 bots*), an API key from an AI provider (or a local model, see
@@ -53,7 +54,7 @@ bots*), an API key from an AI provider (or a local model, see
 ### 1. Add Mnemo to your server
 
 The file [`mnemo.manifest.json`](mnemo.manifest.json) describes Mnemo: its
-name, its avatar, the `/ask` command, and what it asks for (to see channels,
+name, its avatar, the `/ask` and `/details` commands, and what it asks for (to see channels,
 send messages and add reactions, and to receive messages through the
 `GUILD_MESSAGES` intent). Build the add link for your server:
 
@@ -145,7 +146,7 @@ type `/ask`. Nothing happens? See [Troubleshooting](#troubleshooting).
 ## Install on Unraid
 
 Mnemo is a single container with no ports, so it installs from the Community
-Apps *Apps* tab like any other app. It needs a Mnema Talk server 3.1 or newer
+Apps *Apps* tab like any other app. It needs a Mnema Talk server 3.1 or newer (3.3 or newer to read attachments)
 on which you are the Owner (or hold *Manage bots*), for example one installed
 from the [Mnema Talk template](https://github.com/mnema-xyz/talk/blob/main/doc/platform-notes.md#install-on-unraid-via-community-apps).
 
@@ -318,7 +319,8 @@ file refuses them. Mnemo never logs them.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MNEMO_ATTACHMENTS` / `MNEMO_ATTACHMENTS_ENABLED` | `true` | Whether Mnemo can read images and file attachments |
+| `MNEMO_ATTACHMENTS_ENABLED` | `true` | Whether Mnemo can read images and file attachments |
+| `MNEMO_ATTACHMENTS` | | All attachment settings at once, as a JSON object (`{"enabled":false}`); the single variables in this table override its keys |
 | `MNEMO_ATTACHMENTS_MAX_BYTES` | `10485760` (10 MB) | Maximum attachment size in bytes (upper bound 10 MB) |
 | `MNEMO_ATTACHMENTS_ASK_CONSENT` | `true` | Ask for consent before downloading or forwarding attachments |
 | `MNEMO_ATTACHMENTS_PROVIDER_NAME` | *(provider name)* | Provider name displayed in the consent prompt |
@@ -732,7 +734,7 @@ A provider is one file that implements `Provider` from
 takes the system prompt, the conversation and the tools, and returns text,
 tool calls, a stop reason and token usage. Translate Mnemo's neutral turns to
 your API's format. Look at [`anthropic.ts`](src/providers/anthropic.ts) and
-[`openai.ts`](src/providers/openai.ts), which are about 150 lines each. Then add
+[`openai.ts`](src/providers/openai.ts), which are under 200 lines each. Then add
 a case to [`src/providers/index.ts`](src/providers/index.ts) and the name to
 `provider` in `src/config.ts`.
 
@@ -778,7 +780,7 @@ The SDK comes from the npm registry, pinned to an exact version like every
 dependency here:
 
 ```json
-"@mnema-xyz/bot-sdk": "3.1.2"
+"@mnema-xyz/bot-sdk": "3.4.0"
 ```
 
 Each SDK version is published from
