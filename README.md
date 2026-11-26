@@ -780,7 +780,7 @@ The SDK comes from the npm registry, pinned to an exact version like every
 dependency here:
 
 ```json
-"@mnema-xyz/bot-sdk": "3.4.0"
+"@mnema-xyz/bot-sdk": "3.5.0"
 ```
 
 Each SDK version is published from
